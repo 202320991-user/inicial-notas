@@ -6,7 +6,6 @@ import { useSearchParams } from 'next/navigation';
 import { 
   ClipboardList, 
   BookOpen, 
-  Library, 
   Trash2, 
   Plus, 
   Check, 
@@ -38,27 +37,10 @@ export default function EditarPlantillaPage({ params }: { params: Promise<{ id: 
     setTimeout(() => setNotificacion(null), 4000);
   };
 
-  const solicitarCargarUnidad = () => {
-    if (!f.unidadPredefinida) return;
-
-    setModalConfirmacion({
-      titulo: '¿Cargar unidad predefinida?',
-      mensaje: `Esto reemplazará el criterio y los indicadores actuales por los de "${f.unidadPredefinida.titulo}".`,
-      onConfirm: () => {
-        const resultado = f.cargarUnidadPredefinida?.();
-        if (resultado && resultado.aplicados < resultado.total) {
-          mostrarNotificacion(
-            `Se aplicaron ${resultado.aplicados} de ${resultado.total} indicadores.`
-          );
-        }
-      }
-    });
-  };
-
   const solicitarRestaurarOriginal = () => {
     setModalConfirmacion({
       titulo: '¿Restaurar plantilla original?',
-      mensaje: 'Se reemplazarán el criterio y los indicadores por los valores por defecto.',
+      mensaje: 'Se reemplazarán el criterio y los indicadores por los valores oficiales por defecto.',
       onConfirm: () => f.restaurarPlantillaOriginal()
     });
   };
@@ -128,42 +110,46 @@ export default function EditarPlantillaPage({ params }: { params: Promise<{ id: 
                 </span>
               </div>
 
-              {f.competenciaTexto && (
-                <p className="text-sm font-semibold text-slate-800 leading-snug">
-                  {f.competenciaTexto}
-                </p>
-              )}
+              {/* Título y Estándar de Aprendizaje Divididos */}
+              {f.competenciaTexto && (() => {
+                const partes = f.competenciaTexto.split('.');
+                const titulo = partes[0];
+                const estandar = partes.slice(1).join('.').trim();
 
+                return (
+                  <div className="space-y-1.5">
+                    <h3 className="text-sm font-bold text-slate-900 leading-snug">
+                      {titulo}.
+                    </h3>
+                    {estandar && (
+                      <p className="text-xs text-slate-600 leading-relaxed">
+                        {estandar}
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Capacidades Evaluadas */}
               <div className="space-y-1.5 pt-1">
                 <div className="flex items-center justify-between">
-                  <label className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                    <Sparkles size={16} className="text-amber-500 shrink-0" />
+                  <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <Sparkles size={15} className="text-amber-500 shrink-0" />
                     Capacidades Evaluadas
                   </label>
-                  <span className="text-xs text-slate-400 font-medium flex items-center gap-1">
-                    <Pencil size={13} /> Editable
+                  <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                    <Pencil size={12} /> Editable
                   </span>
                 </div>
                 <textarea
                   value={formatearCapacidades(f.capacidadesTexto || '')}
                   onChange={(e) => f.setCapacidadesTexto(e.target.value)}
                   placeholder="Escribe o ajusta las capacidades correspondientes..."
-                  rows={6}
-                  className="w-full min-h-[140px] bg-white border border-slate-200 rounded-xl p-3.5 text-sm text-slate-800 font-normal leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#006492]/20 focus:border-[#006492] transition-all resize-y shadow-inner whitespace-pre-line"
+                  rows={5}
+                  className="w-full bg-white border border-slate-200 rounded-xl p-3 text-xs text-slate-800 font-normal leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#006492]/20 focus:border-[#006492] transition-all resize-y shadow-inner whitespace-pre-line"
                 />
               </div>
             </div>
-          )}
-
-          {f.unidadPredefinida && (
-            <button
-              type="button"
-              onClick={solicitarCargarUnidad}
-              className={`w-full text-left p-3.5 rounded-xl border-2 border-dashed ${color.text} border-current hover:bg-slate-50 transition-all text-xs font-semibold flex items-center gap-2`}
-            >
-              <Library size={16} className="shrink-0" /> 
-              <span>Cargar unidad predefinida: &quot;{f.unidadPredefinida.titulo}&quot;</span>
-            </button>
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

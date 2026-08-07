@@ -56,8 +56,23 @@ export function colorDeArea(area: string) {
 
 export function formatearCapacidades(texto: string): string {
   if (!texto) return '';
-  if (texto.includes('\n')) return texto;
-  return texto.replace(/\.\s+/g, '.\n').trim();
+
+  // Si ya contiene saltos de línea, normaliza espacios por cada línea
+  if (texto.includes('\n')) {
+    return texto
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  // Si viene continuo, convierte puntos seguidos de espacio en saltos de línea
+  return texto
+    .split(/\.\s+/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => (l.endsWith('.') ? l : `${l}.`))
+    .join('\n');
 }
 
 export function agruparPorArea(lista: CompetenciaInfo[]): [string, CompetenciaInfo[]][] {
