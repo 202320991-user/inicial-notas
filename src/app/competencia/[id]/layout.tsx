@@ -20,6 +20,7 @@ export default function CompetenciaLayout({
   const competencia = getCompetencia(id);
   const pathname = usePathname();
   const evaluacionId = useSearchParams().get('evaluacionId');
+  const sufijoEvaluacion = evaluacionId ? `?evaluacionId=${evaluacionId}` : '';
 
   const handleVolverInicio = (e: React.MouseEvent) => {
     if (evaluacionId) return;
@@ -52,10 +53,13 @@ export default function CompetenciaLayout({
   }
 
   const color = colorDeArea(competencia.area);
+  // IMPORTANTE: se agrega el evaluacionId (si existe) a cada pestaña,
+  // para que al navegar entre "Editar Plantilla / Evaluar / Vista Previa"
+  // no se pierda el contexto de qué evaluación se está editando.
   const tabs = [
-    { href: `/competencia/${id}/editar`, label: 'Editar Plantilla', Icon: ClipboardList },
-    { href: `/competencia/${id}/evaluar`, label: 'Evaluar', Icon: ListChecks },
-    { href: `/competencia/${id}/vista-previa`, label: 'Vista Previa', Icon: Eye },
+    { href: `/competencia/${id}/editar${sufijoEvaluacion}`, base: `/competencia/${id}/editar`, label: 'Editar Plantilla', Icon: ClipboardList },
+    { href: `/competencia/${id}/evaluar${sufijoEvaluacion}`, base: `/competencia/${id}/evaluar`, label: 'Evaluar', Icon: ListChecks },
+    { href: `/competencia/${id}/vista-previa${sufijoEvaluacion}`, base: `/competencia/${id}/vista-previa`, label: 'Vista Previa', Icon: Eye },
   ];
 
   return (
@@ -98,10 +102,10 @@ export default function CompetenciaLayout({
         {/* Navegación por pestañas estilizada */}
         <div className="flex gap-2 border-b border-slate-200 overflow-x-auto pb-px">
           {tabs.map((tab) => {
-            const activo = pathname === tab.href;
+            const activo = pathname === tab.base;
             return (
               <Link
-                key={tab.href}
+                key={tab.base}
                 href={tab.href}
                 className={`px-4 py-2.5 text-xs md:text-sm font-bold rounded-t-xl -mb-px border-b-2 whitespace-nowrap transition-all flex items-center gap-2 ${
                   activo 

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { use, useState, useRef, useEffect } from 'react';
+import { use, useRef, useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { RotateCcw, Trash2, Eye, Check, ClipboardList, BookOpen, Sparkles, Mic, MicOff } from 'lucide-react';
 import { useFicha } from '@/lib/useFicha';
@@ -15,6 +15,7 @@ export default function EvaluarPage({ params }: { params: Promise<{ id: string }
   const { id } = use(params);
   const searchParams = useSearchParams();
   const evaluacionId = searchParams.get('evaluacionId') || undefined;
+
   const f = useFicha(id, evaluacionId);
   const color = colorDeArea(f.competenciaInfo?.area ?? '');
 

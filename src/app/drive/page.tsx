@@ -31,7 +31,6 @@ import {
 
 const AREAS = agruparPorArea(COMPETENCIAS);
 
-// 1. Tipos de presets actualizados para Bimestres
 type PresetFecha = 'todo' | 'este_bimestre' | 'b1' | 'b2' | 'b3' | 'b4';
 
 function fechaISO(d: Date): string {
@@ -43,7 +42,6 @@ function DriveContenido() {
   const { evaluaciones, cargado, eliminar } = useEvaluaciones();
   const { listaAlumnos } = useListaAlumnos();
 
-  // Estados de Filtros
   const [texto, setTexto] = useState('');
   const [area, setArea] = useState('');
   const [competenciaId, setCompetenciaId] = useState('');
@@ -52,14 +50,12 @@ function DriveContenido() {
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
 
-  // Estados UI
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [verEvaluacion, setVerEvaluacion] = useState<EvaluacionGuardada | null>(null);
   const [porEliminar, setPorEliminar] = useState<EvaluacionGuardada | null>(null);
   const [descargandoId, setDescargandoId] = useState<string | null>(null);
   const [generandoReporte, setGenerandoReporte] = useState(false);
   
-  // Estado para controlar qué tarjeta/fila muestra el popover de alumnos al hacer hover
   const [hoveredAlumnosId, setHoveredAlumnosId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -70,7 +66,6 @@ function DriveContenido() {
   const competenciasDelArea = useMemo(() => (area ? COMPETENCIAS.filter((c) => c.area === area) : COMPETENCIAS), [area]);
   const alumnoActivo = useMemo(() => listaAlumnos.find((a) => a.id === alumnoId), [listaAlumnos, alumnoId]);
 
-  // 2. Lógica para asignar rangos de fecha según el Bimestre seleccionado
   const aplicarPreset = (nuevo: PresetFecha) => {
     setPreset(nuevo);
     const hoy = new Date();
@@ -80,7 +75,7 @@ function DriveContenido() {
       setDesde('');
       setHasta('');
     } else if (nuevo === 'este_bimestre') {
-      const mesActual = hoy.getMonth(); // 0 a 11
+      const mesActual = hoy.getMonth();
       const mesInicio = mesActual - (mesActual % 2);
       const primerDia = new Date(anio, mesInicio, 1);
       const ultimoDia = new Date(anio, mesInicio + 2, 0);
@@ -190,7 +185,6 @@ function DriveContenido() {
 
   return (
     <main className="p-4 md:p-6 bg-slate-50 min-h-screen text-slate-800 font-sans max-w-7xl mx-auto">
-      {/* Header interno */}
       <div className="mb-6">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
           <div>
@@ -271,7 +265,6 @@ function DriveContenido() {
         </div>
       </div>
 
-      {/* Seccion de Filtros */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm mb-6 flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex-1 min-w-[220px] relative">
@@ -349,7 +342,6 @@ function DriveContenido() {
           </div>
         </div>
 
-        {/* 3. Botones de Filtro por Bimestres */}
         <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-slate-100">
           <div className="flex flex-wrap gap-1">
             {(
@@ -402,7 +394,6 @@ function DriveContenido() {
         </div>
       </div>
 
-      {/* Grid o Lista de Evaluaciones */}
       {!cargado ? (
         <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center text-slate-400">
           Cargando registros del Drive...
@@ -587,7 +578,6 @@ function DriveContenido() {
         </div>
       )}
 
-      {/* Modal: Vista Previa Real */}
       {verEvaluacion && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" onClick={() => setVerEvaluacion(null)}>
           <div className="bg-[#f8fafc] w-full max-w-4xl max-h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200" onClick={(e) => e.stopPropagation()}>
@@ -625,7 +615,6 @@ function DriveContenido() {
         </div>
       )}
 
-      {/* Modal: Confirmación Eliminar */}
       {porEliminar && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" onClick={() => setPorEliminar(null)}>
           <div className="bg-white w-full max-w-sm rounded-3xl shadow-2xl p-6 text-center border border-slate-200" onClick={(e) => e.stopPropagation()}>

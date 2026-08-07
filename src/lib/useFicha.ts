@@ -27,6 +27,24 @@ function ninosPorDefecto(cantidad: number = 4): NinoGuardado[] {
   return Array.from({ length: cantidad }, () => crearNino(''));
 }
 
+// Estructura del borrador temporal de una evaluación EXISTENTE que se está editando.
+// Se guarda ligado al evaluacionId (no a la competencia) para que los cambios
+// sobrevivan al navegar entre "Editar Plantilla / Evaluar / Vista Previa" sin
+// perderse ni mezclarse con los de otra evaluación.
+type BorradorEvaluacion = {
+  actividad: string;
+  unidad: string;
+  fecha: string;
+  criterio: string;
+  items: string[];
+  capacidadesTexto: string;
+  ninos: NinoGuardado[];
+};
+
+function claveBorrador(evaluacionId: string): string {
+  return `borrador_evaluacion_${evaluacionId}`;
+}
+
 export function calcularNivelSugerido(calificaciones: Nivel[]): Nivel {
   const conteo: Record<string, number> = { L: 0, EP: 0, I: 0 };
   calificaciones.forEach((c) => {
@@ -104,17 +122,33 @@ export function useFicha(competenciaId: string, evaluacionIdAEditar?: string) {
     const evaluacionExistente = evaluacionIdAEditar ? obtenerEvaluacion(evaluacionIdAEditar) : null;
 
     if (evaluacionExistente) {
-      setActividad(evaluacionExistente.tituloActividad);
-      setUnidad(evaluacionExistente.unidad || '');
-      setFecha(evaluacionExistente.fecha);
-      setCriterio(evaluacionExistente.criterio || criterioPorDefecto);
-      setCapacidadesTexto(evaluacionExistente.capacidadesTexto || capacidadesPorDefecto);
-      setItems(
-        evaluacionExistente.indicadores?.length > 0
-          ? evaluacionExistente.indicadores
-          : indicadoresDefault
-      );
-      setNinos(evaluacionExistente.ninos.length > 0 ? evaluacionExistente.ninos : ninosPorDefecto());
+      // Si hay un borrador con cambios sin guardar de ESTA misma evaluación
+      // (hechos en "Editar Plantilla" o "Evaluar" antes de llegar aquí),
+      // se usa ese borrador en lugar de los datos originales del Drive.
+      const borrador = leerJSON<BorradorEvaluacion | null>(claveBorrador(evaluacionExistente.id), null);
+
+      if (borrador) {
+        setActividad(borrador.actividad);
+        setUnidad(borrador.unidad);
+        setFecha(borrador.fecha);
+        setCriterio(borrador.criterio);
+        setCapacidadesTexto(borrador.capacidadesTexto);
+        setItems(borrador.items?.length ? borrador.items : indicadoresDefault);
+        setNinos(borrador.ninos?.length ? borrador.ninos : ninosPorDefecto());
+      } else {
+        setActividad(evaluacionExistente.tituloActividad);
+        setUnidad(evaluacionExistente.unidad || '');
+        setFecha(evaluacionExistente.fecha);
+        setCriterio(evaluacionExistente.criterio || criterioPorDefecto);
+        setCapacidadesTexto(evaluacionExistente.capacidadesTexto || capacidadesPorDefecto);
+        setItems(
+          evaluacionExistente.indicadores?.length > 0
+            ? evaluacionExistente.indicadores
+            : indicadoresDefault
+        );
+        setNinos(evaluacionExistente.ninos.length > 0 ? evaluacionExistente.ninos : ninosPorDefecto());
+      }
+
       setEvaluacionIdActual(evaluacionExistente.id);
     } else {
       const guardado = leerJSON<MoldeGuardado | null>(`molde_${competenciaId}`, null);
@@ -152,24 +186,46 @@ export function useFicha(competenciaId: string, evaluacionIdAEditar?: string) {
     }, 0);
   }, [competenciaId, evaluacionIdAEditar, competenciaInfo]);
 
+  // Autoguardado de los datos de la ficha (actividad, unidad, fecha, criterio, items, capacidades).
+  // Si se está editando una evaluación existente, se guarda como borrador ligado a su evaluacionId
+  // (incluyendo a los niños) para que sobreviva a la navegación entre páginas.
+  // Si es una ficha nueva, se mantiene el comportamiento original (molde_${competenciaId}).
   useEffect(() => {
     if (!listoParaGuardar.current) return;
     const timer = setTimeout(() => {
-      const molde: MoldeGuardado = { competenciaId, actividad, unidad, fecha, criterio, items, capacidadesTexto };
-      guardarJSON(`molde_${competenciaId}`, molde);
+      if (evaluacionIdActual) {
+        const borrador: BorradorEvaluacion = {
+          actividad,
+          unidad,
+          fecha,
+          criterio,
+          items,
+          capacidadesTexto,
+          ninos,
+        };
+        guardarJSON(claveBorrador(evaluacionIdActual), borrador);
+      } else {
+        const molde: MoldeGuardado = { competenciaId, actividad, unidad, fecha, criterio, items, capacidadesTexto };
+        guardarJSON(`molde_${competenciaId}`, molde);
+      }
       setGuardadoMoldeEn(Date.now());
     }, 600);
     return () => clearTimeout(timer);
-  }, [competenciaId, actividad, unidad, fecha, criterio, items, capacidadesTexto]);
+  }, [competenciaId, evaluacionIdActual, actividad, unidad, fecha, criterio, items, capacidadesTexto, ninos]);
 
+  // Autoguardado de los niños de la sesión, SOLO para fichas nuevas
+  // (cuando se edita una evaluación existente, los niños ya quedan incluidos
+  // en el borrador guardado arriba, para no duplicar ni desincronizar datos).
   useEffect(() => {
     if (!listoParaGuardar.current) return;
     const timer = setTimeout(() => {
-      guardarJSON(`sesion_${competenciaId}`, ninos);
+      if (!evaluacionIdActual) {
+        guardarJSON(`sesion_${competenciaId}`, ninos);
+      }
       setGuardadoNinosEn(Date.now());
     }, 600);
     return () => clearTimeout(timer);
-  }, [competenciaId, ninos]);
+  }, [competenciaId, evaluacionIdActual, ninos]);
 
   const unidadPredefinida = UNIDADES_PREDEFINIDAS[competenciaId];
 
@@ -291,6 +347,15 @@ export function useFicha(competenciaId: string, evaluacionIdAEditar?: string) {
       indicadores: items,
       ninos,
     });
+
+    // Los cambios ya quedaron guardados de forma definitiva en el Drive:
+    // se descarta el borrador temporal para que no vuelva a "resucitar"
+    // datos viejos la próxima vez que se abra esta evaluación.
+    if (evaluacionIdActual) {
+      guardarJSON(claveBorrador(evaluacionIdActual), null);
+    }
+    guardarJSON(claveBorrador(guardada.id), null);
+
     setEvaluacionIdActual(guardada.id);
     return guardada;
   };
