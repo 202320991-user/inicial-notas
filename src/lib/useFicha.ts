@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { generarExcelEvaluacion, leerEstructuraPlantilla } from '@/lib/excel';
+import { generarExcelEvaluacion } from '@/lib/excel';
 import { getCompetencia, MAX_NINOS } from '@/lib/competencias';
 import { crearId } from '@/lib/roster';
 import { leerJSON, guardarJSON } from '@/lib/storage';
@@ -78,86 +78,79 @@ export function useFicha(competenciaId: string, evaluacionIdAEditar?: string) {
   );
 
   useEffect(() => {
-    let cancelado = false;
     listoParaGuardar.current = false;
-    async function cargar() {
-      setCargando(true);
-      setError('');
-      try {
-        if (!competenciaInfo) {
-          setError('Competencia no encontrada.');
-          return;
-        }
-        const estructura = await leerEstructuraPlantilla(competenciaInfo.archivo);
-        if (cancelado) return;
+    setCargando(true);
+    setError('');
 
-        const oficial = CONTENIDO_OFICIAL[competenciaId];
-        setCompetenciaTexto(oficial?.competenciaTexto ?? estructura.competenciaTexto);
-        const capacidadesPorDefecto = oficial?.capacidadesTexto ?? estructura.capacidadesTexto;
-        const criterioPorDefecto = oficial?.criterioTexto ?? estructura.criterioDefault;
-        setFilasPlantilla(estructura.indicadoresDefault.length);
-
-        const evaluacionExistente = evaluacionIdAEditar ? obtenerEvaluacion(evaluacionIdAEditar) : null;
-
-        if (evaluacionExistente) {
-          setActividad(evaluacionExistente.tituloActividad);
-          setUnidad(evaluacionExistente.unidad || '');
-          setFecha(evaluacionExistente.fecha);
-          setCriterio(evaluacionExistente.criterio || criterioPorDefecto);
-          setCapacidadesTexto(evaluacionExistente.capacidadesTexto || capacidadesPorDefecto);
-          setItems(
-            evaluacionExistente.indicadores?.length > 0
-              ? evaluacionExistente.indicadores
-              : estructura.indicadoresDefault
-          );
-          setNinos(evaluacionExistente.ninos.length > 0 ? evaluacionExistente.ninos : ninosPorDefecto());
-          setEvaluacionIdActual(evaluacionExistente.id);
-        } else {
-          const guardado = leerJSON<MoldeGuardado | null>(`molde_${competenciaId}`, null);
-          const tieneItemsGuardados = !!(guardado?.items?.length);
-
-          if (tieneItemsGuardados && guardado) {
-            setActividad(guardado.actividad || '');
-            setUnidad(guardado.unidad || '');
-            setFecha(guardado.fecha || '');
-            setCriterio(guardado.criterio || criterioPorDefecto);
-            setItems(guardado.items);
-            setCapacidadesTexto(guardado.capacidadesTexto || capacidadesPorDefecto);
-          } else {
-            setActividad('');
-            setUnidad('');
-            setFecha('');
-            setCriterio(criterioPorDefecto);
-            setItems(estructura.indicadoresDefault);
-            setCapacidadesTexto(capacidadesPorDefecto);
-          }
-
-          const sesionGuardada = leerJSON<NinoGuardado[] | null>(`sesion_${competenciaId}`, null);
-          if (sesionGuardada && sesionGuardada.length > 0) {
-            setNinos(sesionGuardada);
-          } else {
-            setNinos(ninosPorDefecto());
-          }
-
-          setEvaluacionIdActual(undefined);
-        }
-      } catch (e) {
-        console.error(e);
-        if (!cancelado) setError('No se pudo leer la plantilla. Verifica que el archivo exista en /public/plantillas.');
-      } finally {
-        if (!cancelado) {
-          setCargando(false);
-          setTimeout(() => {
-            listoParaGuardar.current = true;
-          }, 0);
-        }
-      }
+    if (!competenciaInfo) {
+      setError('Competencia no encontrada.');
+      setCargando(false);
+      return;
     }
-    cargar();
-    return () => {
-      cancelado = true;
-    };
-  }, [competenciaId, evaluacionIdAEditar]);
+
+    const oficial = CONTENIDO_OFICIAL[competenciaId];
+    if (!oficial) {
+      setError(`No se encontraron datos oficiales para la competencia ${competenciaId}.`);
+      setCargando(false);
+      return;
+    }
+
+    setCompetenciaTexto(oficial.competenciaTexto);
+    const capacidadesPorDefecto = oficial.capacidadesTexto;
+    const criterioPorDefecto = oficial.criterioTexto;
+    const indicadoresDefault = oficial.indicadores || [];
+    setFilasPlantilla(indicadoresDefault.length);
+
+    const evaluacionExistente = evaluacionIdAEditar ? obtenerEvaluacion(evaluacionIdAEditar) : null;
+
+    if (evaluacionExistente) {
+      setActividad(evaluacionExistente.tituloActividad);
+      setUnidad(evaluacionExistente.unidad || '');
+      setFecha(evaluacionExistente.fecha);
+      setCriterio(evaluacionExistente.criterio || criterioPorDefecto);
+      setCapacidadesTexto(evaluacionExistente.capacidadesTexto || capacidadesPorDefecto);
+      setItems(
+        evaluacionExistente.indicadores?.length > 0
+          ? evaluacionExistente.indicadores
+          : indicadoresDefault
+      );
+      setNinos(evaluacionExistente.ninos.length > 0 ? evaluacionExistente.ninos : ninosPorDefecto());
+      setEvaluacionIdActual(evaluacionExistente.id);
+    } else {
+      const guardado = leerJSON<MoldeGuardado | null>(`molde_${competenciaId}`, null);
+      const tieneItemsGuardados = !!(guardado?.items?.length);
+
+      if (tieneItemsGuardados && guardado) {
+        setActividad(guardado.actividad || '');
+        setUnidad(guardado.unidad || '');
+        setFecha(guardado.fecha || '');
+        setCriterio(guardado.criterio || criterioPorDefecto);
+        setItems(guardado.items);
+        setCapacidadesTexto(guardado.capacidadesTexto || capacidadesPorDefecto);
+      } else {
+        setActividad('');
+        setUnidad('');
+        setFecha('');
+        setCriterio(criterioPorDefecto);
+        setItems(indicadoresDefault);
+        setCapacidadesTexto(capacidadesPorDefecto);
+      }
+
+      const sesionGuardada = leerJSON<NinoGuardado[] | null>(`sesion_${competenciaId}`, null);
+      if (sesionGuardada && sesionGuardada.length > 0) {
+        setNinos(sesionGuardada);
+      } else {
+        setNinos(ninosPorDefecto());
+      }
+
+      setEvaluacionIdActual(undefined);
+    }
+
+    setCargando(false);
+    setTimeout(() => {
+      listoParaGuardar.current = true;
+    }, 0);
+  }, [competenciaId, evaluacionIdAEditar, competenciaInfo]);
 
   useEffect(() => {
     if (!listoParaGuardar.current) return;
@@ -189,15 +182,13 @@ export function useFicha(competenciaId: string, evaluacionIdAEditar?: string) {
     return { aplicados, total };
   };
 
-  const restaurarPlantillaOriginal = async () => {
+  const restaurarPlantillaOriginal = () => {
     if (!competenciaInfo) return;
-    const estructura = await leerEstructuraPlantilla(competenciaInfo.archivo);
     const oficial = CONTENIDO_OFICIAL[competenciaId];
-    const criterioOriginal = oficial?.criterioTexto ?? estructura.criterioDefault;
-    const capacidadesOriginales = oficial?.capacidadesTexto ?? estructura.capacidadesTexto;
-    setCriterio(criterioOriginal);
-    setCapacidadesTexto(capacidadesOriginales);
-    setItems(estructura.indicadoresDefault);
+    if (!oficial) return;
+    setCriterio(oficial.criterioTexto);
+    setCapacidadesTexto(oficial.capacidadesTexto);
+    setItems(oficial.indicadores);
   };
 
   const handleItemChange = (texto: string, index: number) => {
@@ -273,7 +264,6 @@ export function useFicha(competenciaId: string, evaluacionIdAEditar?: string) {
 
   const exportar = async (soloMolde: boolean) => {
     if (!competenciaInfo) return;
-    // CORRECCIÓN 2: Asegurar que capacidadesTexto se incluya al exportar/generar el excel
     const molde: MoldeGuardado = { competenciaId, actividad, unidad, fecha, criterio, items, capacidadesTexto };
     const registros: RegistroAlumno[] = soloMolde
       ? []
