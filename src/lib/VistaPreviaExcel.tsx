@@ -11,6 +11,7 @@ function colorCeldaNivel(nivel: Nivel): string {
 
 export interface VistaPreviaExcelProps {
   actividad: string;
+  unidad?: string;
   fecha: string;
   competenciaTexto?: string;
   capacidadesTexto?: string;
@@ -22,15 +23,13 @@ export interface VistaPreviaExcelProps {
 /**
  * Vista previa visual de la ficha Excel.
  *
- * IMPORTANTE:
  * El bloque superior (Competencia / Capacidades / Criterio)
- * NO usa la misma tabla de indicadores.
- *
- * Eso evita que los nombres de los niños y las columnas de
- * calificaciones deformen los anchos del bloque superior.
+ * se mantiene separado de la tabla de indicadores para evitar
+ * que los nombres de los niños deformen los anchos.
  */
 export function VistaPreviaExcel({
   actividad,
+  unidad,
   fecha,
   competenciaTexto,
   capacidadesTexto,
@@ -60,6 +59,17 @@ export function VistaPreviaExcel({
       </div>
 
       <div className="border-b border-slate-200 px-3 py-2 font-bold text-slate-700">
+        UNIDAD:{' '}
+        <span className="font-normal">
+          {unidad || (
+            <span className="italic text-slate-300">
+              (sin unidad)
+            </span>
+          )}
+        </span>
+      </div>
+
+      <div className="border-b border-slate-200 px-3 py-2 font-bold text-slate-700">
         FECHA:{' '}
         <span className="font-normal">
           {fecha || (
@@ -72,14 +82,6 @@ export function VistaPreviaExcel({
 
       {/* =======================================================
           BLOQUE SUPERIOR
-
-          Separamos esta zona de la tabla de alumnos para que
-          los anchos sean independientes y estables.
-
-          Proporciones:
-          Competencia = 38%
-          Capacidades = 27%
-          Criterio = 35%
       ======================================================= */}
       {(competenciaTexto || capacidadesTexto || criterio) && (
         <div className="grid grid-cols-[1.08fr_0.92fr_1fr] border-b border-slate-200 bg-slate-50">
@@ -136,10 +138,7 @@ export function VistaPreviaExcel({
       <div className="w-full overflow-x-auto">
         <table className="w-full min-w-[760px] table-fixed border-collapse">
           <colgroup>
-            {/* Indicadores */}
             <col style={{ width: '50%' }} />
-
-            {/* 5 niños */}
             <col style={{ width: '10%' }} />
             <col style={{ width: '10%' }} />
             <col style={{ width: '10%' }} />
@@ -148,7 +147,6 @@ export function VistaPreviaExcel({
           </colgroup>
 
           <tbody>
-            {/* Encabezado */}
             <tr className="bg-slate-100 font-semibold">
               <td className="border-b border-r border-slate-200 p-2">
                 Indicadores de evaluación
@@ -170,7 +168,6 @@ export function VistaPreviaExcel({
               ))}
             </tr>
 
-            {/* Indicadores + niveles */}
             {items.map((texto, idx) => (
               <tr key={idx}>
                 <td className="border-b border-r border-slate-200 p-2 align-top">
@@ -184,8 +181,7 @@ export function VistaPreviaExcel({
                 </td>
 
                 {columnas.map((n, i) => {
-                  const valor =
-                    n?.calificaciones[idx] || '';
+                  const valor = n?.calificaciones[idx] || '';
 
                   return (
                     <td
@@ -201,7 +197,6 @@ export function VistaPreviaExcel({
               </tr>
             ))}
 
-            {/* Leyenda */}
             <tr>
               <td
                 colSpan={6}

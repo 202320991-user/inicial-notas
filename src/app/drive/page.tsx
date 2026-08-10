@@ -604,6 +604,7 @@ function DriveContenido() {
             <div className="p-6 overflow-y-auto">
               <VistaPreviaExcel
                 actividad={verEvaluacion.tituloActividad}
+                unidad={verEvaluacion.unidad || ''}
                 fecha={verEvaluacion.fecha}
                 competenciaTexto={
                   CONTENIDO_OFICIAL[verEvaluacion.competenciaId]?.competenciaTexto ||
