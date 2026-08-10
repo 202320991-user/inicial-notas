@@ -11,6 +11,40 @@ import { Nivel } from '@/types';
 
 const NIVELES: Nivel[] = ['L', 'EP', 'I'];
 
+interface EventoReconocimiento {
+  resultIndex: number;
+  results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>;
+}
+
+interface EventoErrorReconocimiento {
+  error: string;
+}
+
+interface ReconocimientoVoz {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives: number;
+  onstart: (() => void) | null;
+  onspeechend: (() => void) | null;
+  onresult: ((event: EventoReconocimiento) => void) | null;
+  onerror: ((event: EventoErrorReconocimiento) => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  stop(): void;
+}
+
+type ConstructorReconocimientoVoz = new () => ReconocimientoVoz;
+
+function obtenerConstructorReconocimiento(): ConstructorReconocimientoVoz | undefined {
+  const ventana = window as Window & {
+    SpeechRecognition?: ConstructorReconocimientoVoz;
+    webkitSpeechRecognition?: ConstructorReconocimientoVoz;
+  };
+
+  return ventana.SpeechRecognition || ventana.webkitSpeechRecognition;
+}
+
 export default function EvaluarPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const searchParams = useSearchParams();
@@ -21,11 +55,11 @@ export default function EvaluarPage({ params }: { params: Promise<{ id: string }
 
   // Estado y referencia para la grabación de voz por niño
   const [grabandoIndex, setGrabandoIndex] = useState<number | null>(null);
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<ReconocimientoVoz | null>(null);
 
   useEffect(() => {
     // Inicialización de la API en el cliente de manera segura
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const SpeechRecognition = obtenerConstructorReconocimiento();
     if (SpeechRecognition) {
       const recognition = new SpeechRecognition();
       recognition.continuous = true;
@@ -36,7 +70,7 @@ export default function EvaluarPage({ params }: { params: Promise<{ id: string }
   }, []);
 
   const toggleGrabacionVoz = (idx: number, textoActual: string) => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const SpeechRecognition = obtenerConstructorReconocimiento();
 
     if (!SpeechRecognition) {
       alert('Tu navegador no soporta el reconocimiento de voz. Te recomendamos usar Google Chrome.');
@@ -48,7 +82,7 @@ export default function EvaluarPage({ params }: { params: Promise<{ id: string }
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop();
-        } catch (e) {
+        } catch {
           // Ignorar si ya estaba detenido
         }
       }
@@ -60,7 +94,7 @@ export default function EvaluarPage({ params }: { params: Promise<{ id: string }
     if (recognitionRef.current && grabandoIndex !== null) {
       try {
         recognitionRef.current.stop();
-      } catch (e) {
+      } catch {
         // Ignorar
       }
     }
@@ -81,7 +115,7 @@ export default function EvaluarPage({ params }: { params: Promise<{ id: string }
       console.log('Silencio detectado, manteniendo el micro activo...');
     };
 
-    recognition.onresult = (event: any) => {
+    recognition.onresult = (event) => {
       let transcript = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
         if (event.results[i].isFinal) {
@@ -97,7 +131,7 @@ export default function EvaluarPage({ params }: { params: Promise<{ id: string }
       }
     };
 
-    recognition.onerror = (event: any) => {
+    recognition.onerror = (event) => {
       // Ignorar el error 'no-speech' para evitar que se corte por pausas breves
       if (event.error === 'no-speech') {
         console.warn('Silencio detectado por el navegador, continuando...');

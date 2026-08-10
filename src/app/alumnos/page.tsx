@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { 
   Users, 
   Search, 
@@ -20,8 +20,9 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { useListaAlumnos } from '@/lib/useListaAlumnos';
-import { listarEvaluaciones } from '@/lib/evaluaciones';
+import { useEvaluaciones } from '@/lib/useEvaluaciones';
 import { obtenerIniciales } from '@/lib/ui';
+import { useHydrated } from '@/lib/useHydrated';
 
 interface Alumno {
   id: string;
@@ -31,9 +32,15 @@ interface Alumno {
 
 export default function AlumnosPage() {
   const { listaAlumnos, cargado, agregarAlumno, renombrarAlumno, eliminarAlumno } = useListaAlumnos();
+  const {
+    evaluaciones,
+    cargado: evaluacionesCargadas,
+    error: errorEvaluaciones,
+    recargar: recargarEvaluaciones,
+  } = useEvaluaciones();
   
   const [busqueda, setBusqueda] = useState('');
-  const [mounted, setMounted] = useState(false);
+  const mounted = useHydrated();
   const [vista, setVista] = useState<'grid' | 'lista'>('grid');
   const [ordenAlfabetico, setOrdenAlfabetico] = useState(true);
 
@@ -52,10 +59,6 @@ export default function AlumnosPage() {
   const [editNombre, setEditNombre] = useState('');
   const [editDni, setEditDni] = useState('');
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
   // Búsqueda profunda dentro del arreglo de niños ('ninos') de cada ficha guardada
   useEffect(() => {
     if (!alumnoHistorial) {
@@ -64,7 +67,7 @@ export default function AlumnosPage() {
     }
 
     try {
-      const todasEvaluaciones = listarEvaluaciones();
+      const todasEvaluaciones = evaluaciones;
       const historicoAlumno: any[] = [];
 
       todasEvaluaciones.forEach((evaluacion: any) => {
@@ -116,7 +119,7 @@ export default function AlumnosPage() {
       console.error('Error al cargar historial del alumno:', error);
       setHistorialEvaluaciones([]);
     }
-  }, [alumnoHistorial]);
+  }, [alumnoHistorial, evaluaciones]);
 
   const agregar = (e: React.FormEvent) => {
     e.preventDefault();
@@ -563,7 +566,23 @@ export default function AlumnosPage() {
                 </span>
               </div>
 
-              {historialEvaluaciones.length === 0 ? (
+              {!evaluacionesCargadas ? (
+                <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-6 text-center">
+                  <p className="text-sm text-slate-500">Cargando evaluaciones de Drive...</p>
+                </div>
+              ) : errorEvaluaciones ? (
+                <div className="bg-rose-50 border border-rose-200 rounded-2xl p-5 text-center space-y-3">
+                  <p className="text-sm font-semibold text-rose-800">No se pudo cargar el historial desde Drive.</p>
+                  <p className="text-xs text-rose-700">{errorEvaluaciones}</p>
+                  <button
+                    type="button"
+                    onClick={() => void recargarEvaluaciones()}
+                    className="min-h-10 rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white hover:bg-rose-700"
+                  >
+                    Reintentar
+                  </button>
+                </div>
+              ) : historialEvaluaciones.length === 0 ? (
                 <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-6 text-center space-y-3">
                   <Calendar size={32} className="mx-auto text-slate-300" />
                   <div className="space-y-1">

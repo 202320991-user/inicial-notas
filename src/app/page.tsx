@@ -8,6 +8,7 @@ import { agruparPorArea, colorDeArea } from '@/lib/ui';
 import { leerJSON } from '@/lib/storage';
 import { MoldeGuardado, NinoGuardado } from '@/types';
 import { CheckCircle2, Clock, Users } from 'lucide-react';
+import { useHydrated } from '@/lib/useHydrated';
 
 interface EstadoCompetencia {
   configurada: boolean;
@@ -16,7 +17,7 @@ interface EstadoCompetencia {
 
 export default function Home() {
   const [estados, setEstados] = useState<Record<string, EstadoCompetencia>>({});
-  const [mounted, setMounted] = useState(false);
+  const mounted = useHydrated();
 
   const areas = useMemo(() => agruparPorArea(COMPETENCIAS), []);
 
@@ -34,7 +35,6 @@ export default function Home() {
     });
 
     setEstados(nuevo);
-    setMounted(true);
   }, []);
 
   return (

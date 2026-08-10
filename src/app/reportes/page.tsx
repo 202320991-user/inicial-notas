@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import Link from 'next/link';
 import { useListaAlumnos } from '@/lib/useListaAlumnos';
 import { useEvaluaciones } from '@/lib/useEvaluaciones';
 import { COMPETENCIAS } from '@/lib/competencias';
 import { obtenerIniciales } from '@/lib/ui';
+import { useHydrated } from '@/lib/useHydrated';
 import { 
   CheckCircle2, 
   Clock, 
@@ -22,13 +23,9 @@ export default function ReportesPage() {
   const { listaAlumnos } = useListaAlumnos();
   const { evaluaciones } = useEvaluaciones();
   
-  const [montado, setMontado] = useState(false);
+  const montado = useHydrated();
   const [busqueda, setBusqueda] = useState('');
   const [periodoFiltro, setPeriodoFiltro] = useState<PeriodoFiltro>('bimestre');
-
-  useEffect(() => {
-    setMontado(true);
-  }, []);
 
   // Filtrar alumnos según la barra de búsqueda (nombre o DNI)
   const alumnosFiltrados = useMemo(() => {
@@ -42,7 +39,6 @@ export default function ReportesPage() {
   }, [listaAlumnos, busqueda]);
 
   const totalAlumnos = listaAlumnos.length;
-  const totalCompetencias = COMPETENCIAS.length;
 
   // Ajustar metas y ponderaciones según el filtro de tiempo seleccionado
   const metaConfig = useMemo(() => {

@@ -1,15 +1,20 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { generarExcelEvaluacion } from '@/lib/excel';
+import { generarExcelBase64, generarExcelEvaluacion } from '@/lib/excel';
 import { getCompetencia, MAX_NINOS } from '@/lib/competencias';
 import { crearId } from '@/lib/roster';
 import { leerJSON, guardarJSON } from '@/lib/storage';
 import { useListaAlumnos } from '@/lib/useListaAlumnos';
-import { obtenerEvaluacion, guardarEvaluacion } from '@/lib/evaluaciones';
 import { CONTENIDO_OFICIAL } from '@/lib/contenidoOficial';
 import { UNIDADES_PREDEFINIDAS } from '@/lib/unidadesPredefinidas';
-import { MoldeGuardado, Nivel, NinoGuardado, RegistroAlumno } from '@/types';
+import {
+  EvaluacionGuardada,
+  MoldeGuardado,
+  Nivel,
+  NinoGuardado,
+  RegistroAlumno,
+} from '@/types';
 
 function crearNino(nombre: string = '', alumnoId: string | null = null): NinoGuardado {
   return {
@@ -32,6 +37,7 @@ function ninosPorDefecto(cantidad: number = 4): NinoGuardado[] {
 // sobrevivan al navegar entre "Editar Plantilla / Evaluar / Vista Previa" sin
 // perderse ni mezclarse con los de otra evaluación.
 type BorradorEvaluacion = {
+  creadoEn?: string;
   actividad: string;
   unidad: string;
   fecha: string;
@@ -39,6 +45,16 @@ type BorradorEvaluacion = {
   items: string[];
   capacidadesTexto: string;
   ninos: NinoGuardado[];
+};
+
+type ResultadoGuardadoDrive = EvaluacionGuardada & {
+  drive: {
+    ok?: boolean;
+    error?: string;
+    evaluacionId?: string;
+    json?: { id: string; nombre: string } | null;
+    excel?: { id: string; nombre: string } | null;
+  };
 };
 
 function claveBorrador(evaluacionId: string): string {
@@ -67,6 +83,7 @@ export function useFicha(competenciaId: string, evaluacionIdAEditar?: string) {
   const competenciaInfo = getCompetencia(competenciaId);
   const { listaAlumnos } = useListaAlumnos();
   const [evaluacionIdActual, setEvaluacionIdActual] = useState<string | undefined>(evaluacionIdAEditar);
+  const [creadoEnEvaluacion, setCreadoEnEvaluacion] = useState<string | undefined>();
 
   const [actividad, setActividad] = useState('');
   const [unidad, setUnidad] = useState('');
@@ -83,6 +100,7 @@ export function useFicha(competenciaId: string, evaluacionIdAEditar?: string) {
   const [filasPlantilla, setFilasPlantilla] = useState(0);
 
   const listoParaGuardar = useRef(false);
+  const guardadoEnCurso = useRef<Promise<ResultadoGuardadoDrive> | null>(null);
   const [ninos, setNinos] = useState<NinoGuardado[]>([]);
 
   const indicadoresActivos = useMemo(
@@ -96,94 +114,207 @@ export function useFicha(competenciaId: string, evaluacionIdAEditar?: string) {
   );
 
   useEffect(() => {
-    listoParaGuardar.current = false;
-    setCargando(true);
-    setError('');
+    let cancelado = false;
 
-    if (!competenciaInfo) {
-      setError('Competencia no encontrada.');
-      setCargando(false);
-      return;
-    }
+    const cargar = async () => {
+      listoParaGuardar.current = false;
+      setCargando(true);
+      setError('');
 
-    const oficial = CONTENIDO_OFICIAL[competenciaId];
-    if (!oficial) {
-      setError(`No se encontraron datos oficiales para la competencia ${competenciaId}.`);
-      setCargando(false);
-      return;
-    }
+      if (!competenciaInfo) {
+        setError('Competencia no encontrada.');
+        setCargando(false);
+        return;
+      }
 
-    setCompetenciaTexto(oficial.competenciaTexto);
-    const capacidadesPorDefecto = oficial.capacidadesTexto;
-    const criterioPorDefecto = oficial.criterioTexto;
-    const indicadoresDefault = oficial.indicadores || [];
-    setFilasPlantilla(indicadoresDefault.length);
+      const oficial = CONTENIDO_OFICIAL[competenciaId];
 
-    const evaluacionExistente = evaluacionIdAEditar ? obtenerEvaluacion(evaluacionIdAEditar) : null;
+      if (!oficial) {
+        setError(`No se encontraron datos oficiales para la competencia ${competenciaId}.`);
+        setCargando(false);
+        return;
+      }
 
-    if (evaluacionExistente) {
-      // Si hay un borrador con cambios sin guardar de ESTA misma evaluación
-      // (hechos en "Editar Plantilla" o "Evaluar" antes de llegar aquí),
-      // se usa ese borrador en lugar de los datos originales del Drive.
-      const borrador = leerJSON<BorradorEvaluacion | null>(claveBorrador(evaluacionExistente.id), null);
+      setCompetenciaTexto(oficial.competenciaTexto);
 
-      if (borrador) {
-        setActividad(borrador.actividad);
-        setUnidad(borrador.unidad);
-        setFecha(borrador.fecha);
-        setCriterio(borrador.criterio);
-        setCapacidadesTexto(borrador.capacidadesTexto);
-        setItems(borrador.items?.length ? borrador.items : indicadoresDefault);
-        setNinos(borrador.ninos?.length ? borrador.ninos : ninosPorDefecto());
+      const capacidadesPorDefecto = oficial.capacidadesTexto;
+      const criterioPorDefecto = oficial.criterioTexto;
+      const indicadoresDefault = oficial.indicadores || [];
+
+      setFilasPlantilla(indicadoresDefault.length);
+
+      /**
+       * --------------------------------------------------
+       * EDITANDO UNA EVALUACIÓN EXISTENTE
+       * --------------------------------------------------
+       */
+      if (evaluacionIdAEditar) {
+        try {
+          /**
+           * Primero buscamos un borrador local de esta misma evaluación.
+           * Si existe, tiene prioridad para no perder cambios sin guardar.
+           */
+          const borrador = leerJSON<BorradorEvaluacion | null>(
+            claveBorrador(evaluacionIdAEditar),
+            null
+          );
+
+          if (borrador) {
+            let creadoEn = borrador.creadoEn;
+
+            // Los borradores creados antes de esta migraciÃ³n no tienen timestamp.
+            // Lo recuperamos de Drive sin reemplazar el contenido local del borrador.
+            if (!creadoEn) {
+              try {
+                const respuesta = await fetch(
+                  `/api/drive/obtener?id=${encodeURIComponent(evaluacionIdAEditar)}`,
+                  { method: 'GET', cache: 'no-store' }
+                );
+                const datos = await respuesta.json();
+                if (respuesta.ok && datos.ok && typeof datos.evaluacion?.creadoEn === 'string') {
+                  creadoEn = datos.evaluacion.creadoEn;
+                }
+              } catch {
+                // El borrador sigue disponible aun si la red no permite recuperar el timestamp.
+              }
+            }
+
+            if (cancelado) return;
+
+            setActividad(borrador.actividad);
+            setUnidad(borrador.unidad);
+            setFecha(borrador.fecha);
+            setCriterio(borrador.criterio);
+            setCapacidadesTexto(borrador.capacidadesTexto);
+            setItems(borrador.items?.length ? borrador.items : indicadoresDefault);
+            setNinos(borrador.ninos?.length ? borrador.ninos : ninosPorDefecto());
+            setEvaluacionIdActual(evaluacionIdAEditar);
+            setCreadoEnEvaluacion(creadoEn);
+
+            setCargando(false);
+
+            setTimeout(() => {
+              listoParaGuardar.current = true;
+            }, 0);
+
+            return;
+          }
+
+          /**
+           * Si no hay borrador, cargamos la evaluación real
+           * directamente desde Google Drive.
+           */
+          const response = await fetch(
+            `/api/drive/obtener?id=${encodeURIComponent(evaluacionIdAEditar)}`,
+            {
+              method: 'GET',
+              cache: 'no-store',
+            }
+          );
+
+          const data = await response.json();
+
+          if (!response.ok || !data.ok || !data.evaluacion) {
+            throw new Error(
+              data.error || 'No se pudo cargar la evaluación desde Google Drive.'
+            );
+          }
+
+          if (cancelado) return;
+
+          const evaluacionExistente = data.evaluacion;
+
+          setActividad(evaluacionExistente.tituloActividad || '');
+          setUnidad(evaluacionExistente.unidad || '');
+          setFecha(evaluacionExistente.fecha || '');
+          setCriterio(evaluacionExistente.criterio || criterioPorDefecto);
+          setCapacidadesTexto(
+            evaluacionExistente.capacidadesTexto || capacidadesPorDefecto
+          );
+          setItems(
+            evaluacionExistente.indicadores?.length > 0
+              ? evaluacionExistente.indicadores
+              : indicadoresDefault
+          );
+          setNinos(
+            evaluacionExistente.ninos?.length > 0
+              ? evaluacionExistente.ninos
+              : ninosPorDefecto()
+          );
+
+          setEvaluacionIdActual(evaluacionExistente.id);
+          setCreadoEnEvaluacion(evaluacionExistente.creadoEn);
+        } catch (e) {
+          console.error('Error cargando evaluación desde Google Drive:', e);
+
+          if (!cancelado) {
+            setError(
+              e instanceof Error
+                ? e.message
+                : 'No se pudo cargar la evaluación.'
+            );
+          }
+        }
       } else {
-        setActividad(evaluacionExistente.tituloActividad);
-        setUnidad(evaluacionExistente.unidad || '');
-        setFecha(evaluacionExistente.fecha);
-        setCriterio(evaluacionExistente.criterio || criterioPorDefecto);
-        setCapacidadesTexto(evaluacionExistente.capacidadesTexto || capacidadesPorDefecto);
-        setItems(
-          evaluacionExistente.indicadores?.length > 0
-            ? evaluacionExistente.indicadores
-            : indicadoresDefault
+        /**
+         * --------------------------------------------------
+         * NUEVA EVALUACIÓN
+         * --------------------------------------------------
+         */
+        const guardado = leerJSON<MoldeGuardado | null>(
+          `molde_${competenciaId}`,
+          null
         );
-        setNinos(evaluacionExistente.ninos.length > 0 ? evaluacionExistente.ninos : ninosPorDefecto());
+
+        const tieneItemsGuardados = !!guardado?.items?.length;
+
+        if (tieneItemsGuardados && guardado) {
+          setActividad(guardado.actividad || '');
+          setUnidad(guardado.unidad || '');
+          setFecha(guardado.fecha || '');
+          setCriterio(guardado.criterio || criterioPorDefecto);
+          setItems(guardado.items);
+          setCapacidadesTexto(
+            guardado.capacidadesTexto || capacidadesPorDefecto
+          );
+        } else {
+          setActividad('');
+          setUnidad('');
+          setFecha('');
+          setCriterio(criterioPorDefecto);
+          setItems(indicadoresDefault);
+          setCapacidadesTexto(capacidadesPorDefecto);
+        }
+
+        const sesionGuardada = leerJSON<NinoGuardado[] | null>(
+          `sesion_${competenciaId}`,
+          null
+        );
+
+        if (sesionGuardada && sesionGuardada.length > 0) {
+          setNinos(sesionGuardada);
+        } else {
+          setNinos(ninosPorDefecto());
+        }
+
+        setEvaluacionIdActual(undefined);
+        setCreadoEnEvaluacion(undefined);
       }
 
-      setEvaluacionIdActual(evaluacionExistente.id);
-    } else {
-      const guardado = leerJSON<MoldeGuardado | null>(`molde_${competenciaId}`, null);
-      const tieneItemsGuardados = !!(guardado?.items?.length);
+      if (!cancelado) {
+        setCargando(false);
 
-      if (tieneItemsGuardados && guardado) {
-        setActividad(guardado.actividad || '');
-        setUnidad(guardado.unidad || '');
-        setFecha(guardado.fecha || '');
-        setCriterio(guardado.criterio || criterioPorDefecto);
-        setItems(guardado.items);
-        setCapacidadesTexto(guardado.capacidadesTexto || capacidadesPorDefecto);
-      } else {
-        setActividad('');
-        setUnidad('');
-        setFecha('');
-        setCriterio(criterioPorDefecto);
-        setItems(indicadoresDefault);
-        setCapacidadesTexto(capacidadesPorDefecto);
+        setTimeout(() => {
+          listoParaGuardar.current = true;
+        }, 0);
       }
+    };
 
-      const sesionGuardada = leerJSON<NinoGuardado[] | null>(`sesion_${competenciaId}`, null);
-      if (sesionGuardada && sesionGuardada.length > 0) {
-        setNinos(sesionGuardada);
-      } else {
-        setNinos(ninosPorDefecto());
-      }
+    void cargar();
 
-      setEvaluacionIdActual(undefined);
-    }
-
-    setCargando(false);
-    setTimeout(() => {
-      listoParaGuardar.current = true;
-    }, 0);
+    return () => {
+      cancelado = true;
+    };
   }, [competenciaId, evaluacionIdAEditar, competenciaInfo]);
 
   // Autoguardado de los datos de la ficha (actividad, unidad, fecha, criterio, items, capacidades).
@@ -195,6 +326,7 @@ export function useFicha(competenciaId: string, evaluacionIdAEditar?: string) {
     const timer = setTimeout(() => {
       if (evaluacionIdActual) {
         const borrador: BorradorEvaluacion = {
+          creadoEn: creadoEnEvaluacion,
           actividad,
           unidad,
           fecha,
@@ -211,7 +343,7 @@ export function useFicha(competenciaId: string, evaluacionIdAEditar?: string) {
       setGuardadoMoldeEn(Date.now());
     }, 600);
     return () => clearTimeout(timer);
-  }, [competenciaId, evaluacionIdActual, actividad, unidad, fecha, criterio, items, capacidadesTexto, ninos]);
+  }, [competenciaId, evaluacionIdActual, creadoEnEvaluacion, actividad, unidad, fecha, criterio, items, capacidadesTexto, ninos]);
 
   // Autoguardado de los niños de la sesión, SOLO para fichas nuevas
   // (cuando se edita una evaluación existente, los niños ya quedan incluidos
@@ -332,10 +464,30 @@ export function useFicha(competenciaId: string, evaluacionIdAEditar?: string) {
     await generarExcelEvaluacion(competenciaInfo.archivo, molde, registros);
   };
 
-  const guardarEnDrive = () => {
-    if (!competenciaInfo) return null;
-    const guardada = guardarEvaluacion({
-      id: evaluacionIdActual,
+  const guardarEnDrive = (): Promise<ResultadoGuardadoDrive> => {
+    if (guardadoEnCurso.current) return guardadoEnCurso.current;
+
+    const operacion = (async (): Promise<ResultadoGuardadoDrive> => {
+    if (!competenciaInfo) {
+      throw new Error('Competencia no encontrada.');
+    }
+
+    // Primero conservamos el comportamiento actual de la app.
+    // Esto mantiene compatible /drive mientras todavía migramos
+    // la lectura de evaluaciones desde localStorage hacia Google Drive.
+    const ahora = new Date().toISOString();
+    const id = evaluacionIdActual || crearId('eval');
+    const creadoEn = creadoEnEvaluacion || ahora;
+
+    // Para una ficha nueva, fijamos ID y fecha de creación antes de contactar
+    // Drive. Un reintento tras una red inestable conserva el mismo registro.
+    if (!evaluacionIdActual) {
+      setEvaluacionIdActual(id);
+      setCreadoEnEvaluacion(creadoEn);
+    }
+
+    const guardada: EvaluacionGuardada = {
+      id,
       tituloActividad: actividad,
       unidad,
       fecha,
@@ -343,21 +495,99 @@ export function useFicha(competenciaId: string, evaluacionIdAEditar?: string) {
       competenciaId,
       competenciaNombre: competenciaInfo.nombre,
       criterio,
-      capacidadesTexto, 
+      capacidadesTexto,
       indicadores: items,
       ninos,
+      creadoEn,
+      actualizadoEn: ahora,
+    };
+
+    const molde: MoldeGuardado = {
+      competenciaId,
+      actividad,
+      unidad,
+      fecha,
+      criterio,
+      items,
+      capacidadesTexto,
+    };
+
+    const registros: RegistroAlumno[] = ninos.map((n) => ({
+      nombre: n.nombre,
+      calificaciones: n.calificaciones,
+      nivelAlcanzado: n.nivelAlcanzado,
+      observacionDescriptiva: n.observacionDescriptiva,
+    }));
+
+    // Generamos exactamente el mismo Excel que se descarga desde la app,
+    // pero en Base64 para enviarlo al backend de Next.js.
+    const excelBase64 = await generarExcelBase64(
+      competenciaInfo.archivo,
+      molde,
+      registros
+    );
+
+    const response = await fetch('/api/drive/guardar', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        evaluacion: guardada,
+        excelBase64,
+      }),
     });
 
-    // Los cambios ya quedaron guardados de forma definitiva en el Drive:
-    // se descarta el borrador temporal para que no vuelva a "resucitar"
-    // datos viejos la próxima vez que se abra esta evaluación.
+    const texto = await response.text();
+
+    let resultado: {
+      ok?: boolean;
+      error?: string;
+      evaluacionId?: string;
+      json?: { id: string; nombre: string } | null;
+      excel?: { id: string; nombre: string } | null;
+    };
+
+    try {
+      resultado = JSON.parse(texto);
+    } catch {
+      throw new Error(
+        'El servidor respondió con un formato inesperado al guardar en Google Drive.'
+      );
+    }
+
+    if (!response.ok || !resultado.ok) {
+      throw new Error(
+        resultado.error || 'No se pudo guardar la evaluación en Google Drive.'
+      );
+    }
+
+    // Solo eliminamos los borradores cuando Google Drive confirmó
+    // que el guardado terminó correctamente.
     if (evaluacionIdActual) {
       guardarJSON(claveBorrador(evaluacionIdActual), null);
     }
+
     guardarJSON(claveBorrador(guardada.id), null);
 
     setEvaluacionIdActual(guardada.id);
-    return guardada;
+    setCreadoEnEvaluacion(guardada.creadoEn);
+
+    return {
+      ...guardada,
+      drive: resultado,
+    };
+    })();
+
+    guardadoEnCurso.current = operacion;
+    const liberar = () => {
+      if (guardadoEnCurso.current === operacion) {
+        guardadoEnCurso.current = null;
+      }
+    };
+    void operacion.then(liberar, liberar);
+
+    return operacion;
   };
 
   const finalizarSesion = () => {

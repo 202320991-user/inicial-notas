@@ -10,6 +10,7 @@ import { agruparPorArea, colorDeArea, obtenerIniciales } from '@/lib/ui';
 import { generarExcelEvaluacion } from '@/lib/excel';
 import { generarReporteAlumno } from '@/lib/reporteAlumno';
 import { VistaPreviaExcel } from '@/components/VistaPreviaExcel';
+import { CONTENIDO_OFICIAL } from '@/lib/contenidoOficial';
 import { EvaluacionGuardada, MoldeGuardado, RegistroAlumno } from '@/types';
 
 import { 
@@ -39,7 +40,7 @@ function fechaISO(d: Date): string {
 
 function DriveContenido() {
   const searchParams = useSearchParams();
-  const { evaluaciones, cargado, eliminar } = useEvaluaciones();
+  const { evaluaciones, cargado, error: errorDrive, eliminar } = useEvaluaciones();
   const { listaAlumnos } = useListaAlumnos();
 
   const [texto, setTexto] = useState('');
@@ -55,6 +56,7 @@ function DriveContenido() {
   const [porEliminar, setPorEliminar] = useState<EvaluacionGuardada | null>(null);
   const [descargandoId, setDescargandoId] = useState<string | null>(null);
   const [generandoReporte, setGenerandoReporte] = useState(false);
+  const [eliminandoId, setEliminandoId] = useState<string | null>(null);
   
   const [hoveredAlumnosId, setHoveredAlumnosId] = useState<string | null>(null);
 
@@ -154,6 +156,7 @@ function DriveContenido() {
         fecha: ev.fecha,
         criterio: ev.criterio,
         items: ev.indicadores,
+        capacidadesTexto: ev.capacidadesTexto || '',
       };
       const registros: RegistroAlumno[] = (ev.ninos || []).map((n) => ({
         nombre: n.nombre,
@@ -394,6 +397,13 @@ function DriveContenido() {
         </div>
       </div>
 
+      {errorDrive && (
+        <div className="mb-6 bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm">
+          <p className="font-bold">No se pudieron cargar las evaluaciones de Google Drive.</p>
+          <p className="mt-1 text-xs">{errorDrive}</p>
+        </div>
+      )}
+
       {!cargado ? (
         <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center text-slate-400">
           Cargando registros del Drive...
@@ -595,6 +605,16 @@ function DriveContenido() {
               <VistaPreviaExcel
                 actividad={verEvaluacion.tituloActividad}
                 fecha={verEvaluacion.fecha}
+                competenciaTexto={
+                  CONTENIDO_OFICIAL[verEvaluacion.competenciaId]?.competenciaTexto ||
+                  verEvaluacion.competenciaNombre ||
+                  ''
+                }
+                capacidadesTexto={
+                  verEvaluacion.capacidadesTexto ||
+                  CONTENIDO_OFICIAL[verEvaluacion.competenciaId]?.capacidadesTexto ||
+                  ''
+                }
                 criterio={verEvaluacion.criterio}
                 items={verEvaluacion.indicadores}
                 ninos={verEvaluacion.ninos}
@@ -628,14 +648,27 @@ function DriveContenido() {
 
             <div className="flex flex-col gap-2.5">
               <button 
-                className="w-full py-2.5 bg-rose-600 text-white rounded-xl font-bold text-xs hover:bg-rose-700 transition-all shadow-sm" 
-                onClick={() => {
-                  eliminar(porEliminar.id);
-                  setPorEliminar(null);
-                }}
-              >
-                Sí, eliminar
-              </button>
+                  className="w-full py-2.5 bg-rose-600 text-white rounded-xl font-bold text-xs hover:bg-rose-700 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed" 
+                  disabled={eliminandoId === porEliminar.id}
+                  onClick={async () => {
+                    try {
+                      setEliminandoId(porEliminar.id);
+                      await eliminar(porEliminar.id);
+                      setPorEliminar(null);
+                    } catch (error) {
+                      console.error(error);
+                      alert(
+                        error instanceof Error
+                          ? error.message
+                          : 'No se pudo eliminar la evaluación.'
+                      );
+                    } finally {
+                      setEliminandoId(null);
+                    }
+                  }}
+                >
+                  {eliminandoId === porEliminar.id ? 'Eliminando...' : 'Sí, eliminar'}
+                </button>
               <button 
                 className="w-full py-2.5 border border-slate-300 rounded-xl font-bold text-xs text-slate-700 hover:bg-slate-100 transition-all" 
                 onClick={() => setPorEliminar(null)}

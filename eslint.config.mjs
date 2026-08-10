@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Ignore build artifacts even when a second project folder exists inside the workspace.
+    "**/.next/**",
   ]),
 ]);
 
