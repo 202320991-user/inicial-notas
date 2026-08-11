@@ -1,6 +1,7 @@
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { Alumno, EvaluacionGuardada, Nivel } from '@/types';
+import { buscarRegistroAlumno } from '@/lib/alumnoMatch';
 
 function etiquetaNivel(nivel: Nivel): string {
   if (nivel === 'L') return 'Logrado';
@@ -14,11 +15,15 @@ function etiquetaNivel(nivel: Nivel): string {
  * plantilla física) con el historial completo de UN alumno a través de todas las áreas
  * y competencias en las que tenga evaluaciones guardadas en el Drive.
  */
-export async function generarReporteAlumno(alumno: Alumno, evaluaciones: EvaluacionGuardada[]): Promise<void> {
+export async function generarReporteAlumno(
+  alumno: Alumno,
+  evaluaciones: EvaluacionGuardada[]
+): Promise<void> {
   const filas = evaluaciones
     .map((ev) => {
-      const nino = ev.ninos.find((n) => n.alumnoId === alumno.id);
+      const nino = buscarRegistroAlumno(ev, alumno);
       if (!nino) return null;
+
       return {
         fecha: ev.fecha || '',
         area: ev.areaNombre,
@@ -48,29 +53,73 @@ export async function generarReporteAlumno(alumno: Alumno, evaluaciones: Evaluac
     { key: 'observacion', width: 55 },
   ];
 
-  const encabezados = ['Fecha', 'Área', 'Competencia', 'Actividad', 'Nivel alcanzado', 'Observación descriptiva'];
+  const encabezados = [
+    'Fecha',
+    'Área',
+    'Competencia',
+    'Actividad',
+    'Nivel alcanzado',
+    'Observación descriptiva',
+  ];
+
   const filaEncabezado = ws.getRow(2);
+
   encabezados.forEach((texto, i) => {
     filaEncabezado.getCell(i + 1).value = texto;
   });
+
   filaEncabezado.font = { bold: true };
+
   filaEncabezado.eachCell((cell) => {
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F2F8' } };
-    cell.border = { bottom: { style: 'thin', color: { argb: 'FFBEC7D1' } } };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE6F2F8' },
+    };
+
+    cell.border = {
+      bottom: {
+        style: 'thin',
+        color: { argb: 'FFBEC7D1' },
+      },
+    };
   });
 
   filas.forEach((fila) => {
-    const fechaFormateada = fila.fecha ? fila.fecha.split('-').reverse().join('/') : '';
-    const row = ws.addRow({ ...fila, fecha: fechaFormateada });
-    row.getCell(6).alignment = { wrapText: true, vertical: 'top' };
-    row.getCell(3).alignment = { wrapText: true, vertical: 'top' };
+    const fechaFormateada = fila.fecha
+      ? fila.fecha.split('-').reverse().join('/')
+      : '';
+
+    const row = ws.addRow({
+      ...fila,
+      fecha: fechaFormateada,
+    });
+
+    row.getCell(3).alignment = {
+      wrapText: true,
+      vertical: 'top',
+    };
+
+    row.getCell(6).alignment = {
+      wrapText: true,
+      vertical: 'top',
+    };
   });
 
   if (filas.length === 0) {
-    ws.addRow(['Este alumno todavía no tiene evaluaciones guardadas en el Drive.']);
+    ws.addRow([
+      'Este alumno todavía no tiene evaluaciones guardadas en el Drive.',
+    ]);
   }
 
   const buffer = await workbook.xlsx.writeBuffer();
-  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-  saveAs(blob, `Historial_${alumno.nombre.replace(/\s+/g, '_')}.xlsx`);
+
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+
+  saveAs(
+    blob,
+    `Historial_${alumno.nombre.replace(/\s+/g, '_')}.xlsx`
+  );
 }

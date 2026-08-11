@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { 
   Users, 
   Search, 
@@ -17,12 +17,21 @@ import {
   CreditCard,
   Edit3,
   FileText,
-  ChevronRight
+  ChevronRight,
+  Eye,
+  FileSpreadsheet
 } from 'lucide-react';
 import { useListaAlumnos } from '@/lib/useListaAlumnos';
 import { useEvaluaciones } from '@/lib/useEvaluaciones';
 import { obtenerIniciales } from '@/lib/ui';
 import { useHydrated } from '@/lib/useHydrated';
+import {
+  construirHistorialAlumno,
+  HistorialAlumnoItem,
+} from '@/lib/historialAlumno';
+import { DetalleEvaluacionAlumno } from '@/components/alumnos/DetalleEvaluacionAlumno';
+import { ResumenAlumno } from '@/components/alumnos/ResumenAlumno';
+import { generarReporteAlumno } from '@/lib/reporteAlumno';
 
 interface Alumno {
   id: string;
@@ -50,8 +59,10 @@ export default function AlumnosPage() {
   const [alumnoHistorial, setAlumnoHistorial] = useState<Alumno | null>(null);
   const [alumnoParaEditar, setAlumnoParaEditar] = useState<Alumno | null>(null);
 
-  // Historial de evaluaciones del alumno seleccionado
-  const [historialEvaluaciones, setHistorialEvaluaciones] = useState<any[]>([]);
+  // Navegación interna del perfil/historial del alumno
+  const [vistaHistorial, setVistaHistorial] = useState<'lista' | 'resumen' | 'detalle'>('lista');
+  const [detalleHistorial, setDetalleHistorial] = useState<HistorialAlumnoItem | null>(null);
+  const [generandoReporte, setGenerandoReporte] = useState(false);
 
   // Campos de formulario
   const [nuevoNombre, setNuevoNombre] = useState('');
@@ -59,67 +70,47 @@ export default function AlumnosPage() {
   const [editNombre, setEditNombre] = useState('');
   const [editDni, setEditDni] = useState('');
 
-  // Búsqueda profunda dentro del arreglo de niños ('ninos') de cada ficha guardada
-  useEffect(() => {
-    if (!alumnoHistorial) {
-      setHistorialEvaluaciones([]);
-      return;
-    }
+  // Historial individual construido desde las evaluaciones de Drive.
+  // Usa la misma regla de compatibilidad por ID/nombre definida en alumnoMatch.ts.
+  const historialEvaluaciones = useMemo(() => {
+    if (!alumnoHistorial) return [];
+    return construirHistorialAlumno(alumnoHistorial, evaluaciones);
+  }, [alumnoHistorial, evaluaciones]);
+
+  const abrirHistorial = (alumno: Alumno) => {
+    setAlumnoHistorial(alumno);
+    setVistaHistorial('lista');
+    setDetalleHistorial(null);
+  };
+
+  const cerrarHistorial = () => {
+    setAlumnoHistorial(null);
+    setVistaHistorial('lista');
+    setDetalleHistorial(null);
+  };
+
+  const abrirDetalleHistorial = (item: HistorialAlumnoItem) => {
+    setDetalleHistorial(item);
+    setVistaHistorial('detalle');
+  };
+
+  const descargarReporteAlumnoActual = async () => {
+    if (!alumnoHistorial || generandoReporte) return;
 
     try {
-      const todasEvaluaciones = evaluaciones;
-      const historicoAlumno: any[] = [];
-
-      todasEvaluaciones.forEach((evaluacion: any) => {
-        // La ficha guardada contiene el arreglo de niños en .ninos (o .alumnos)
-        const listaNinos = evaluacion.ninos || evaluacion.alumnos || evaluacion.estudiantes || [];
-
-        // Buscamos si el alumno seleccionado forma parte de esta ficha
-        const registroNino = listaNinos.find((n: any) => {
-          if (!n) return false;
-
-          // 1. Coincidencia por ID (si se guardó con ID)
-          if (n.id && alumnoHistorial.id && n.id === alumnoHistorial.id) return true;
-          if (n.alumnoId && alumnoHistorial.id && n.alumnoId === alumnoHistorial.id) return true;
-
-          // 2. Coincidencia por Nombre (normalizado a minúsculas y sin espacios de más)
-          const nombreNino = (n.nombre || n.nombreAlumno || '').trim().toLowerCase();
-          const nombreBuscado = alumnoHistorial.nombre.trim().toLowerCase();
-
-          return (
-            nombreNino !== '' &&
-            (nombreNino === nombreBuscado ||
-              nombreNino.includes(nombreBuscado) ||
-              nombreBuscado.includes(nombreNino))
-          );
-        });
-
-        // Si el alumno está dentro de la ficha, extraemos su información específica
-        if (registroNino) {
-          historicoAlumno.push({
-            id: evaluacion.id,
-            fecha: evaluacion.fecha || evaluacion.creadoEn,
-            competenciaNombre:
-              evaluacion.competenciaNombre ||
-              evaluacion.competenciaTexto ||
-              evaluacion.titulo ||
-              'Ficha de Evaluación',
-            nivelLogro: registroNino.nivelLogro || registroNino.nivel || (Array.isArray(registroNino.calificaciones) ? registroNino.calificaciones.find(Boolean) : null),
-            observacion:
-              registroNino.observacionDescriptiva ||
-              registroNino.observacion ||
-              registroNino.conclusiones,
-            datosNino: registroNino
-          });
-        }
-      });
-
-      setHistorialEvaluaciones(historicoAlumno);
+      setGenerandoReporte(true);
+      await generarReporteAlumno(alumnoHistorial, evaluaciones);
     } catch (error) {
-      console.error('Error al cargar historial del alumno:', error);
-      setHistorialEvaluaciones([]);
+      console.error('Error generando reporte del alumno:', error);
+      alert(
+        error instanceof Error
+          ? error.message
+          : 'No se pudo generar el reporte del alumno.'
+      );
+    } finally {
+      setGenerandoReporte(false);
     }
-  }, [alumnoHistorial, evaluaciones]);
+  };
 
   const agregar = (e: React.FormEvent) => {
     e.preventDefault();
@@ -307,7 +298,7 @@ export default function AlumnosPage() {
               <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setAlumnoHistorial(a)}
+                  onClick={() => abrirHistorial(a)}
                   className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold py-2 rounded-xl transition-colors text-center"
                 >
                   Historial
@@ -341,7 +332,7 @@ export default function AlumnosPage() {
                 <div className="flex items-center gap-2 shrink-0">
                   <button
                     type="button"
-                    onClick={() => setAlumnoHistorial(a)}
+                    onClick={() => abrirHistorial(a)}
                     className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold px-3 py-1.5 rounded-xl transition-colors"
                   >
                     Historial
@@ -531,48 +522,91 @@ export default function AlumnosPage() {
         </div>
       )}
 
-      {/* Modal / Panel de Historial Conectado */}
+      {/* Modal / Panel de perfil e historial individual */}
       {alumnoHistorial && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-end p-0 md:p-4">
-          <div className="bg-white rounded-none md:rounded-3xl max-w-lg w-full h-full md:h-auto max-h-[90vh] p-6 shadow-2xl border border-slate-100 space-y-5 overflow-y-auto relative flex flex-col">
-            <button
-              onClick={() => setAlumnoHistorial(null)}
-              className="absolute right-4 top-4 text-slate-400 hover:text-slate-600 p-1.5 rounded-full hover:bg-slate-100 transition-colors"
-            >
-              <X size={18} />
-            </button>
+        <div className="fixed inset-0 z-50 flex items-center justify-end bg-slate-900/40 p-0 backdrop-blur-sm md:p-4">
+          <div className="relative flex h-full w-full max-w-2xl flex-col overflow-hidden border border-slate-100 bg-white shadow-2xl md:h-auto md:max-h-[92vh] md:rounded-3xl">
+            {/* Encabezado fijo */}
+            <div className="shrink-0 border-b border-slate-100 bg-white p-5 md:p-6">
+              <button
+                type="button"
+                onClick={cerrarHistorial}
+                className="absolute right-4 top-4 rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                aria-label="Cerrar historial"
+              >
+                <X size={18} />
+              </button>
 
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-[#006492] text-white font-bold flex items-center justify-center text-sm shadow-md">
-                {obtenerIniciales(alumnoHistorial.nombre)}
+              <div className="flex items-center gap-3 pr-8">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#006492] text-sm font-bold text-white shadow-md">
+                  {obtenerIniciales(alumnoHistorial.nombre)}
+                </div>
+
+                <div className="min-w-0">
+                  <h3 className="truncate text-lg font-bold text-slate-900">
+                    {alumnoHistorial.nombre}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    {alumnoHistorial.dni
+                      ? `DNI: ${alumnoHistorial.dni}`
+                      : 'DNI: No especificado'}
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-lg font-bold text-slate-900">{alumnoHistorial.nombre}</h3>
-                <p className="text-xs text-slate-400">
-                  {alumnoHistorial.dni ? `DNI: ${alumnoHistorial.dni}` : 'DNI: No especificado'}
-                </p>
-              </div>
+
+              {evaluacionesCargadas && !errorEvaluaciones && historialEvaluaciones.length > 0 && (
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setVistaHistorial('lista');
+                      setDetalleHistorial(null);
+                    }}
+                    className={`rounded-xl px-3 py-2 text-xs font-bold transition-colors ${
+                      vistaHistorial === 'lista'
+                        ? 'bg-[#006492] text-white'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    Historial
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setVistaHistorial('resumen');
+                      setDetalleHistorial(null);
+                    }}
+                    className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold transition-colors ${
+                      vistaHistorial === 'resumen'
+                        ? 'bg-[#006492] text-white'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    <Eye size={14} />
+                    Vista general
+                  </button>
+
+                  <span className="ml-auto rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-500">
+                    {historialEvaluaciones.length} registro(s)
+                  </span>
+                </div>
+              )}
             </div>
 
-            <hr className="border-slate-100" />
-
-            <div className="space-y-3 flex-1 overflow-y-auto">
-              <div className="flex items-center justify-between">
-                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                  <FileText size={14} className="text-[#006492]" /> Fichas y Evaluaciones
-                </h4>
-                <span className="text-[11px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
-                  {historialEvaluaciones.length} registro(s)
-                </span>
-              </div>
-
+            {/* Contenido desplazable */}
+            <div className="flex-1 overflow-y-auto p-5 md:p-6">
               {!evaluacionesCargadas ? (
-                <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-6 text-center">
-                  <p className="text-sm text-slate-500">Cargando evaluaciones de Drive...</p>
+                <div className="rounded-2xl border border-slate-200/80 bg-slate-50 p-8 text-center">
+                  <p className="text-sm text-slate-500">
+                    Cargando evaluaciones de Drive...
+                  </p>
                 </div>
               ) : errorEvaluaciones ? (
-                <div className="bg-rose-50 border border-rose-200 rounded-2xl p-5 text-center space-y-3">
-                  <p className="text-sm font-semibold text-rose-800">No se pudo cargar el historial desde Drive.</p>
+                <div className="space-y-3 rounded-2xl border border-rose-200 bg-rose-50 p-5 text-center">
+                  <p className="text-sm font-semibold text-rose-800">
+                    No se pudo cargar el historial desde Drive.
+                  </p>
                   <p className="text-xs text-rose-700">{errorEvaluaciones}</p>
                   <button
                     type="button"
@@ -583,70 +617,125 @@ export default function AlumnosPage() {
                   </button>
                 </div>
               ) : historialEvaluaciones.length === 0 ? (
-                <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-6 text-center space-y-3">
+                <div className="space-y-3 rounded-2xl border border-slate-200/80 bg-slate-50 p-8 text-center">
                   <Calendar size={32} className="mx-auto text-slate-300" />
                   <div className="space-y-1">
-                    <p className="text-sm font-semibold text-slate-700">Sin evaluaciones registradas</p>
+                    <p className="text-sm font-semibold text-slate-700">
+                      Sin evaluaciones registradas
+                    </p>
                     <p className="text-xs text-slate-400">
                       Este alumno aún no cuenta con registros dentro de las fichas guardadas.
                     </p>
                   </div>
                 </div>
+              ) : vistaHistorial === 'detalle' && detalleHistorial ? (
+                <DetalleEvaluacionAlumno
+                  item={detalleHistorial}
+                  onVolver={() => {
+                    setVistaHistorial('lista');
+                    setDetalleHistorial(null);
+                  }}
+                />
+              ) : vistaHistorial === 'resumen' ? (
+                <ResumenAlumno
+                  alumno={alumnoHistorial}
+                  historial={historialEvaluaciones}
+                />
               ) : (
-                <div className="space-y-2">
-                  {historialEvaluaciones.map((item: any, idx: number) => (
-                    <div 
-                      key={item.id || idx}
-                      className="bg-slate-50 border border-slate-200/70 hover:border-sky-200 rounded-2xl p-3.5 transition-all flex items-center justify-between gap-3"
-                    >
-                      <div className="space-y-1 min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-slate-800 truncate">
-                            {item.competenciaNombre}
-                          </span>
-                          {item.nivelLogro && (
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                              item.nivelLogro === 'AD' ? 'bg-emerald-100 text-emerald-700' :
-                              item.nivelLogro === 'A' ? 'bg-sky-100 text-[#006492]' :
-                              item.nivelLogro === 'B' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'
-                            }`}>
-                              Nivel {item.nivelLogro}
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-700">
+                      <FileText size={14} className="text-[#006492]" />
+                      Fichas y evaluaciones
+                    </h4>
+                    <p className="mt-1 text-xs text-slate-400">
+                      Toca un registro para ver únicamente los resultados de este alumno.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {historialEvaluaciones.map((item) => (
+                      <button
+                        key={item.evaluacionId}
+                        type="button"
+                        onClick={() => abrirDetalleHistorial(item)}
+                        className="flex w-full items-center justify-between gap-3 rounded-2xl border border-slate-200/80 bg-slate-50 p-3.5 text-left transition-all hover:border-sky-200 hover:bg-sky-50/40"
+                      >
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="max-w-full truncate text-xs font-bold text-slate-800">
+                              {item.competenciaNombre}
                             </span>
+
+                            {item.nivelAlcanzado && (
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                  item.nivelAlcanzado === 'L'
+                                    ? 'bg-emerald-100 text-emerald-700'
+                                    : item.nivelAlcanzado === 'EP'
+                                      ? 'bg-amber-100 text-amber-700'
+                                      : 'bg-rose-100 text-rose-700'
+                                }`}
+                              >
+                                Nivel {item.nivelAlcanzado}
+                              </span>
+                            )}
+                          </div>
+
+                          <p className="truncate text-[11px] font-medium text-slate-600">
+                            {item.actividad || 'Actividad sin nombre'}
+                          </p>
+
+                          <p className="flex items-center gap-1 text-[11px] text-slate-400">
+                            <Calendar size={11} />
+                            {item.fecha
+                              ? item.fecha.split('-').reverse().join('/')
+                              : 'Fecha no registrada'}
+                          </p>
+
+                          {item.observacionDescriptiva && (
+                            <p className="max-w-md truncate text-[11px] italic text-slate-500">
+                              &quot;{item.observacionDescriptiva}&quot;
+                            </p>
                           )}
                         </div>
-                        <p className="text-[11px] text-slate-400 flex items-center gap-1">
-                          <Calendar size={11} /> {item.fecha ? new Date(item.fecha).toLocaleDateString() : 'Fecha no registrada'}
-                        </p>
-                        {item.observacion && (
-                          <p className="text-[11px] text-slate-500 italic truncate max-w-xs">
-                            "{item.observacion}"
-                          </p>
-                        )}
-                      </div>
 
-                      <Link
-                        href={`/drive?alumnoId=${alumnoHistorial.id}`}
-                        className="p-2 text-slate-400 hover:text-[#006492] hover:bg-white rounded-xl transition-colors shadow-sm shrink-0"
-                      >
-                        <ChevronRight size={16} />
-                      </Link>
-                    </div>
-                  ))}
+                        <div className="shrink-0 rounded-xl bg-white p-2 text-slate-400 shadow-sm">
+                          <ChevronRight size={16} />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
 
-            <div className="pt-2 border-t border-slate-100">
-              <Link
-                href={`/drive?alumnoId=${alumnoHistorial.id}`}
-                className="w-full bg-[#006492] hover:bg-[#005278] text-white text-xs font-semibold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm"
-              >
-                <Download size={16} /> Ver Reportes en Drive
-              </Link>
-            </div>
+            {/* Acciones fijas */}
+            {evaluacionesCargadas && !errorEvaluaciones && historialEvaluaciones.length > 0 && (
+              <div className="grid shrink-0 grid-cols-1 gap-2 border-t border-slate-100 bg-white p-4 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => void descargarReporteAlumnoActual()}
+                  disabled={generandoReporte}
+                  className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-bold text-[#006492] transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <FileSpreadsheet size={16} />
+                  {generandoReporte ? 'Generando Excel...' : 'Descargar reporte Excel'}
+                </button>
+
+                <Link
+                  href={`/drive?alumnoId=${alumnoHistorial.id}`}
+                  className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#006492] px-4 py-3 text-xs font-bold text-white shadow-sm transition-all hover:bg-[#005278]"
+                >
+                  <Download size={16} />
+                  Ver registros en Drive
+                </Link>
+              </div>
+            )}
           </div>
         </div>
       )}
+
     </main>
   );
 }

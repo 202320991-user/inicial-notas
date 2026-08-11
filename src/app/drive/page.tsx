@@ -9,6 +9,7 @@ import { COMPETENCIAS, getCompetencia } from '@/lib/competencias';
 import { agruparPorArea, colorDeArea, obtenerIniciales } from '@/lib/ui';
 import { generarExcelEvaluacion } from '@/lib/excel';
 import { generarReporteAlumno } from '@/lib/reporteAlumno';
+import { coincideAlumno } from '@/lib/alumnoMatch';
 import { VistaPreviaExcel } from '@/components/VistaPreviaExcel';
 import { CONTENIDO_OFICIAL } from '@/lib/contenidoOficial';
 import { EvaluacionGuardada, MoldeGuardado, RegistroAlumno } from '@/types';
@@ -123,9 +124,12 @@ function DriveContenido() {
         if (competenciaId && ev.competenciaId !== competenciaId) return false;
 
         if (alumnoId) {
-          const tieneAlumno = (ev.ninos || []).some(
-            (n) => String(n.alumnoId || '') === String(alumnoId) || String(n.id || '') === String(alumnoId)
+          if (!alumnoActivo) return false;
+
+          const tieneAlumno = (ev.ninos || []).some((nino) =>
+            coincideAlumno(alumnoActivo, nino)
           );
+
           if (!tieneAlumno) return false;
         }
 
@@ -139,7 +143,7 @@ function DriveContenido() {
         const fechaB = b.actualizadoEn || b.fecha || '';
         return fechaB.localeCompare(fechaA);
       });
-  }, [evaluaciones, texto, area, competenciaId, alumnoId, desde, hasta]);
+  }, [evaluaciones, texto, area, competenciaId, alumnoId, alumnoActivo, desde, hasta]);
 
   const descargarDirecto = async (ev: EvaluacionGuardada) => {
     const compInfo = getCompetencia(ev.competenciaId);
