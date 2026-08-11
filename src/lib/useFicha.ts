@@ -25,6 +25,7 @@ function crearNino(nombre: string = '', alumnoId: string | null = null): NinoGua
     nivelAlcanzado: '',
     nivelManual: false,
     observacionDescriptiva: '',
+    asistencia: 'presente',
   };
 }
 
@@ -436,17 +437,98 @@ export function useFicha(competenciaId: string, evaluacionIdAEditar?: string) {
   const handleCalificacion = (ninoIdx: number, indicadorIdx: number, nivel: Nivel) => {
     setNinos((prev) =>
       prev.map((n, i) => {
-        if (i !== ninoIdx) return n;
+        if (i !== ninoIdx || n.asistencia === 'falto') return n;
+
         const calif = [...n.calificaciones];
         calif[indicadorIdx] = calif[indicadorIdx] === nivel ? '' : nivel;
-        const nuevoNivel = n.nivelManual ? n.nivelAlcanzado : calcularNivelSugerido(calif);
-        return { ...n, calificaciones: calif, nivelAlcanzado: nuevoNivel };
+
+        const nuevoNivel = n.nivelManual
+          ? n.nivelAlcanzado
+          : calcularNivelSugerido(calif);
+
+        return {
+          ...n,
+          asistencia: n.asistencia ?? 'presente',
+          calificaciones: calif,
+          nivelAlcanzado: nuevoNivel,
+        };
       })
     );
   };
 
-  const handleNivelManual = (idx: number, nivel: Nivel) => actualizarNino(idx, { nivelAlcanzado: nivel, nivelManual: true });
-  const handleObservacion = (idx: number, texto: string) => actualizarNino(idx, { observacionDescriptiva: texto });
+  const handleNivelManual = (idx: number, nivel: Nivel) => {
+    setNinos((prev) =>
+      prev.map((n, i) => {
+        if (i !== idx || n.asistencia === 'falto') return n;
+
+        return {
+          ...n,
+          asistencia: n.asistencia ?? 'presente',
+          nivelAlcanzado: nivel,
+          nivelManual: true,
+        };
+      })
+    );
+  };
+
+  const handleObservacion = (idx: number, texto: string) => {
+    setNinos((prev) =>
+      prev.map((n, i) => {
+        if (i !== idx || n.asistencia === 'falto') return n;
+
+        return {
+          ...n,
+          asistencia: n.asistencia ?? 'presente',
+          observacionDescriptiva: texto,
+        };
+      })
+    );
+  };
+
+  /**
+   * Marca la asistencia del niño para esta sesión.
+   *
+   * Si faltó:
+   * - limpia todas las calificaciones;
+   * - deja el nivel general vacío;
+   * - desactiva el nivel manual;
+   * - completa la observación con "No asistió.".
+   *
+   * Si vuelve a Presente:
+   * - no inventa calificaciones;
+   * - elimina únicamente la observación automática "No asistió.".
+   */
+  const handleAsistencia = (
+    idx: number,
+    asistencia: 'presente' | 'falto'
+  ) => {
+    setNinos((prev) =>
+      prev.map((n, i) => {
+        if (i !== idx) return n;
+
+        if (asistencia === 'falto') {
+          return {
+            ...n,
+            asistencia: 'falto',
+            calificaciones: [],
+            nivelAlcanzado: '',
+            nivelManual: false,
+            observacionDescriptiva: 'No asistió.',
+          };
+        }
+
+        return {
+          ...n,
+          asistencia: 'presente',
+          observacionDescriptiva:
+            n.observacionDescriptiva.trim().toLocaleLowerCase('es-PE') ===
+            'no asistió.'.toLocaleLowerCase('es-PE')
+              ? ''
+              : n.observacionDescriptiva,
+        };
+      })
+    );
+  };
 
   const reiniciarNinos = () => setNinos(ninosPorDefecto());
 
@@ -609,22 +691,24 @@ export function useFicha(competenciaId: string, evaluacionIdAEditar?: string) {
       advertencias.push('No has escrito el nombre de ningún niño.');
       return advertencias;
     }
-    const sinCalificar = conNombre.filter((n) => n.calificaciones.every((c) => !c));
-    if (sinCalificar.length === conNombre.length) {
-      advertencias.push('Ningún niño tiene calificaciones todavía.');
+    const presentes = conNombre.filter((n) => n.asistencia !== 'falto');
+    const sinCalificar = presentes.filter((n) =>
+      n.calificaciones.every((c) => !c)
+    );
+
+    if (presentes.length > 0 && sinCalificar.length === presentes.length) {
+      advertencias.push('Ningún niño presente tiene calificaciones todavía.');
     } else if (sinCalificar.length > 0) {
-      advertencias.push(`Estos niños aún no tienen ninguna calificación: ${sinCalificar.map((n) => n.nombre).join(', ')}.`);
+      advertencias.push(
+        `Estos niños presentes aún no tienen ninguna calificación: ${sinCalificar
+          .map((n) => n.nombre)
+          .join(', ')}.`
+      );
     }
     if (!actividad.trim()) advertencias.push('No has escrito el nombre de la actividad.');
     if (!unidad.trim()) advertencias.push('No has escrito el nombre de la unidad.');
     if (!fecha.trim()) advertencias.push('No has elegido una fecha.');
     if (indicadoresActivos.length === 0) advertencias.push('No hay indicadores con texto para calificar.');
-    if (filasPlantilla > 0 && indicadoresActivos.length > filasPlantilla) {
-      const sobrantes = indicadoresActivos.length - filasPlantilla;
-      advertencias.push(
-        `Tienes ${indicadoresActivos.length} indicadores con texto, pero la plantilla física solo tiene ${filasPlantilla} filas. Los últimos ${sobrantes} no aparecerán en el Excel.`
-      );
-    }
     return advertencias;
   };
 
@@ -666,6 +750,7 @@ export function useFicha(competenciaId: string, evaluacionIdAEditar?: string) {
     handleCalificacion,
     handleNivelManual,
     handleObservacion,
+    handleAsistencia,
     reiniciarNinos,
     exportar,
     obtenerAdvertencias,

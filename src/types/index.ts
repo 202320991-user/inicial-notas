@@ -44,10 +44,11 @@ export interface Alumno {
 }
 
 /**
- * Estado de un niño dentro de la sesión de UNA competencia (se persiste por competencia
- * para que cambiar de competencia no mezcle calificaciones de indicadores distintos).
- * Si `alumnoId` referencia a un alumno de la lista maestra, o es null si el nombre
- * se escribió libremente sin vincularlo a la lista.
+ * Estado de un niño dentro de la sesión de UNA competencia.
+ *
+ * `asistencia` es opcional para mantener compatibilidad con evaluaciones antiguas:
+ * - undefined o 'presente' = comportamiento normal.
+ * - 'falto' = no asistió a la sesión; no se le asignan L / EP / I.
  */
 export interface NinoGuardado {
   id: string;
@@ -57,12 +58,11 @@ export interface NinoGuardado {
   nivelAlcanzado: Nivel;
   nivelManual: boolean;
   observacionDescriptiva: string;
+  asistencia?: 'presente' | 'falto';
 }
 
 /**
- * Una ficha de evaluación ya completada y guardada en el "Drive" (historial).
- * Reutiliza `NinoGuardado` tal cual (en vez de un formato `resultados: Record<number,...>`
- * separado) para no mantener dos vocabularios distintos de lo mismo en el código.
+ * Una ficha de evaluación ya completada y guardada en Drive.
  */
 export interface EvaluacionGuardada {
   id: string;

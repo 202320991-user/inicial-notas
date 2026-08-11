@@ -237,6 +237,174 @@ function aplicarBordesFila(
 }
 
 /**
+ * Desplaza un rango combinado hacia abajo cuando se insertan filas.
+ */
+function desplazarRangoCombinado(
+  rango: string,
+  desdeFila: number,
+  cantidad: number
+): string {
+  const match = rango.match(
+    /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/
+  );
+
+  if (!match) return rango;
+
+  const [, colInicio, filaInicioTexto, colFin, filaFinTexto] =
+    match;
+
+  let filaInicio = Number(filaInicioTexto);
+  let filaFin = Number(filaFinTexto);
+
+  if (filaInicio >= desdeFila) {
+    filaInicio += cantidad;
+    filaFin += cantidad;
+  } else if (filaFin >= desdeFila) {
+    filaFin += cantidad;
+  }
+
+  return `${colInicio}${filaInicio}:${colFin}${filaFin}`;
+}
+
+/**
+ * Copia el aspecto de una fila de indicador base a una fila nueva.
+ *
+ * Las filas de indicadores usan A:C como una celda combinada,
+ * y D:H para las calificaciones de los niños.
+ */
+function copiarEstiloFilaIndicador(
+  ws: ExcelJS.Worksheet,
+  filaOrigen: number,
+  filaDestino: number
+) {
+  const origen = ws.getRow(filaOrigen);
+  const destino = ws.getRow(filaDestino);
+
+  destino.height = origen.height;
+
+  for (let columna = 1; columna <= 8; columna++) {
+    const source = origen.getCell(columna);
+    const target = destino.getCell(columna);
+
+    target.style = {
+      ...source.style,
+    };
+  }
+
+  // Cada indicador ocupa A:C.
+  try {
+    ws.mergeCells(`A${filaDestino}:C${filaDestino}`);
+  } catch {
+    // Si ya estuviera combinado por herencia de la plantilla,
+    // no necesitamos hacer nada adicional.
+  }
+
+  aplicarBordesFila(
+    ws,
+    filaDestino,
+    ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+  );
+}
+
+/**
+ * Amplía físicamente la plantilla Excel cuando hay más indicadores
+ * que filas disponibles en el archivo base.
+ *
+ * Inserta las filas ANTES de Leyenda, desplaza las secciones inferiores
+ * y conserva sus rangos combinados.
+ */
+function ampliarFilasIndicadores(
+  ws: ExcelJS.Worksheet,
+  indicatorStartRow: number,
+  legendRowOriginal: number,
+  cantidadIndicadores: number
+): number {
+  const filasBase = Math.max(
+    0,
+    legendRowOriginal - indicatorStartRow
+  );
+
+  const filasExtra = Math.max(
+    0,
+    cantidadIndicadores - filasBase
+  );
+
+  if (filasExtra === 0) {
+    return legendRowOriginal;
+  }
+
+  const filaModelo = Math.max(
+    indicatorStartRow,
+    legendRowOriginal - 1
+  );
+
+  // Guardamos los merges desde Leyenda hacia abajo porque algunas
+  // versiones de ExcelJS no los desplazan de forma totalmente fiable.
+  const mergesOriginales = [
+    ...(ws.model.merges || []),
+  ];
+
+  const mergesInferiores = mergesOriginales.filter((rango) => {
+    const match = rango.match(
+      /^[A-Z]+(\d+):[A-Z]+(\d+)$/
+    );
+
+    if (!match) return false;
+
+    const filaInicio = Number(match[1]);
+    const filaFin = Number(match[2]);
+
+    return (
+      filaInicio >= legendRowOriginal ||
+      filaFin >= legendRowOriginal
+    );
+  });
+
+  mergesInferiores.forEach((rango) => {
+    try {
+      ws.unMergeCells(rango);
+    } catch {
+      // Continuamos: el rango puede haber sido alterado internamente
+      // por una plantilla concreta.
+    }
+  });
+
+  // Insertamos todas las filas nuevas antes de Leyenda.
+  ws.insertRows(
+    legendRowOriginal,
+    Array.from({ length: filasExtra }, () => []),
+    'i'
+  );
+
+  // Restauramos los merges inferiores ya desplazados.
+  mergesInferiores.forEach((rango) => {
+    const desplazado = desplazarRangoCombinado(
+      rango,
+      legendRowOriginal,
+      filasExtra
+    );
+
+    try {
+      ws.mergeCells(desplazado);
+    } catch {
+      // Evita que una combinación atípica de una plantilla impida
+      // generar toda la ficha.
+    }
+  });
+
+  // Convertimos las filas insertadas en filas de indicador reales.
+  for (let i = 0; i < filasExtra; i++) {
+    copiarEstiloFilaIndicador(
+      ws,
+      filaModelo,
+      legendRowOriginal + i
+    );
+  }
+
+  return legendRowOriginal + filasExtra;
+}
+
+/**
  * Devuelve estructura general para compatibilidad con la app.
  */
 export async function leerEstructuraPlantilla(
@@ -350,11 +518,30 @@ async function crearWorkbookEvaluacion(
   const ninos =
     registros.slice(0, MAX_NINOS);
 
-  const items =
+  const itemsOriginales =
     molde.items &&
     molde.items.length > 0
       ? molde.items
       : oficial.indicadores || [];
+
+  /**
+   * Solo exportamos indicadores que realmente tienen texto.
+   *
+   * Conservamos el índice original para leer la calificación
+   * correcta de cada niño aunque existan indicadores vacíos
+   * entre otros indicadores completados.
+   */
+  const indicadoresParaExcel =
+    itemsOriginales
+      .map((texto, indiceOriginal) => ({
+        texto,
+        indiceOriginal,
+      }))
+      .filter(
+        ({ texto }) =>
+          typeof texto === 'string' &&
+          texto.trim() !== ''
+      );
 
   /**
    * --------------------------------------------------
@@ -364,13 +551,29 @@ async function crearWorkbookEvaluacion(
 
   const indicatorStartRow = 8;
 
+  const legendRowOriginal =
+    encontrarFilaLeyenda(ws);
+
+  /**
+   * Si el docente creó más indicadores que los que caben
+   * originalmente en la plantilla, ampliamos el Excel antes
+   * de calcular las posiciones de las secciones inferiores.
+   */
+  ampliarFilasIndicadores(
+    ws,
+    indicatorStartRow,
+    legendRowOriginal,
+    indicadoresParaExcel.length
+  );
+
+  // Volvemos a detectar las posiciones después de cualquier inserción.
   const legendRow =
     encontrarFilaLeyenda(ws);
 
   const indicatorEndRow =
     legendRow - 1;
 
-  const maxIndicadoresPlantilla =
+  const totalFilasIndicadores =
     Math.max(
       0,
       indicatorEndRow -
@@ -554,7 +757,7 @@ async function crearWorkbookEvaluacion(
 
   for (
     let i = 0;
-    i < maxIndicadoresPlantilla;
+    i < totalFilasIndicadores;
     i++
   ) {
     const fila =
@@ -565,8 +768,11 @@ async function crearWorkbookEvaluacion(
         `A${fila}`
       );
 
+    const indicador =
+      indicadoresParaExcel[i];
+
     indicadorCell.value =
-      items[i] || '';
+      indicador?.texto?.trim() || '';
 
     indicadorCell.alignment = {
       ...indicadorCell.alignment,
@@ -580,10 +786,15 @@ async function crearWorkbookEvaluacion(
         const nino =
           ninos[idx];
 
+        const indiceCalificacion =
+          indicador?.indiceOriginal;
+
         const valor =
-          nino
-            ?.calificaciones
-            ?.[i] || '';
+          indiceCalificacion !== undefined
+            ? nino?.calificaciones?.[
+                indiceCalificacion
+              ] || ''
+            : '';
 
         const cell =
           ws.getCell(

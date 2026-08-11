@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { use, useState } from 'react';
+import { use, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { 
   ClipboardList, 
@@ -12,10 +12,15 @@ import {
   AlertCircle,
   RotateCcw,
   Sparkles,
-  Pencil
+  Pencil,
+  ChevronDown,
+  ChevronUp,
+  Clock3,
+  History
 } from 'lucide-react';
 import { useFicha } from '@/lib/useFicha';
 import { colorDeArea, inputClase, formatearCapacidades } from '@/lib/ui';
+import { useUnidadesRecientes } from '@/lib/useUnidadesRecientes';
 
 export default function EditarPlantillaPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -32,6 +37,33 @@ export default function EditarPlantillaPage({ params }: { params: Promise<{ id: 
     onConfirm: () => void;
   } | null>(null);
 
+  const [mostrarUnidadesRecientes, setMostrarUnidadesRecientes] = useState(false);
+  const [mostrarAnteriores, setMostrarAnteriores] = useState(false);
+
+  const {
+    recientes: unidadesRecientes,
+    anteriores: unidadesAnteriores,
+    cargando: cargandoUnidades,
+    error: errorUnidades,
+  } = useUnidadesRecientes(f.fecha);
+
+  const unidadActualNormalizada = useMemo(
+    () => f.unidad.trim().replace(/\s+/g, ' ').toLocaleLowerCase('es-PE'),
+    [f.unidad]
+  );
+
+  const formatearFechaUnidad = (fecha: string) => {
+    const [anio, mes, dia] = fecha.split('-').map(Number);
+
+    if (!anio || !mes || !dia) return fecha;
+
+    return new Intl.DateTimeFormat('es-PE', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    }).format(new Date(anio, mes - 1, dia));
+  };
+
   const mostrarNotificacion = (msg: string) => {
     setNotificacion(msg);
     setTimeout(() => setNotificacion(null), 4000);
@@ -46,10 +78,11 @@ export default function EditarPlantillaPage({ params }: { params: Promise<{ id: 
   };
 
   const agregarIndicador = () => {
-    const excedeFilas = f.agregarIndicador();
-    if (excedeFilas) {
+    const excedeFilasBase = f.agregarIndicador();
+
+    if (excedeFilasBase) {
       mostrarNotificacion(
-        `Atención: La plantilla física solo tiene ${f.filasPlantilla} filas impresas.`
+        'La plantilla se ampliará automáticamente para incluir este indicador en el Excel.'
       );
     }
   };
@@ -153,15 +186,237 @@ export default function EditarPlantillaPage({ params }: { params: Promise<{ id: 
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Unidad</label>
-              <input
-                type="text"
-                placeholder="Ej. Unidad 1"
-                value={f.unidad}
-                onChange={(e) => f.setUnidad(e.target.value)}
-                className={inputClase}
-              />
+            <div className="md:col-span-1">
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Unidad
+              </label>
+
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  placeholder="Escribe o elige una unidad reciente"
+                  value={f.unidad}
+                  onChange={(e) => f.setUnidad(e.target.value)}
+                  className={inputClase}
+                />
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMostrarUnidadesRecientes((prev) => !prev);
+                    if (mostrarUnidadesRecientes) {
+                      setMostrarAnteriores(false);
+                    }
+                  }}
+                  className="flex w-full items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left text-[11px] font-semibold text-slate-600 transition-colors hover:border-[#006492]/30 hover:bg-sky-50/50 hover:text-[#006492]"
+                >
+                  <span className="flex items-center gap-2">
+                    <History size={14} />
+                    Ver unidades recientes
+                  </span>
+
+                  {mostrarUnidadesRecientes ? (
+                    <ChevronUp size={14} />
+                  ) : (
+                    <ChevronDown size={14} />
+                  )}
+                </button>
+
+                {mostrarUnidadesRecientes && (
+                  <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    <div className="border-b border-slate-100 bg-slate-50 px-3 py-2.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-[11px] font-bold text-slate-700">
+                            Unidades usadas recientemente
+                          </p>
+                          <p className="mt-0.5 text-[10px] text-slate-400">
+                            Últimos 15 días respecto a la fecha de esta ficha.
+                          </p>
+                        </div>
+
+                        <Clock3 size={15} className="shrink-0 text-slate-400" />
+                      </div>
+                    </div>
+
+                    {cargandoUnidades ? (
+                      <div className="px-3 py-5 text-center text-[11px] text-slate-400">
+                        Buscando unidades en Drive...
+                      </div>
+                    ) : errorUnidades ? (
+                      <div className="px-3 py-4 text-[11px] text-rose-600">
+                        No se pudieron cargar las unidades recientes.
+                      </div>
+                    ) : unidadesRecientes.length === 0 ? (
+                      <div className="space-y-2 px-3 py-4 text-center">
+                        <p className="text-[11px] font-semibold text-slate-600">
+                          No hay unidades usadas en los últimos 15 días.
+                        </p>
+
+                        {unidadesAnteriores.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setMostrarAnteriores(true)}
+                            className="text-[11px] font-bold text-[#006492] hover:underline"
+                          >
+                            Ver unidades anteriores
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-slate-100">
+                        {unidadesRecientes.map((unidad) => {
+                          const activa =
+                            unidadActualNormalizada ===
+                            unidad.nombre
+                              .trim()
+                              .replace(/\s+/g, ' ')
+                              .toLocaleLowerCase('es-PE');
+
+                          return (
+                            <button
+                              key={`${unidad.nombre}-${unidad.ultimoUso}`}
+                              type="button"
+                              onClick={() => {
+                                f.setUnidad(unidad.nombre);
+                                mostrarNotificacion(
+                                  `Unidad seleccionada: ${unidad.nombre}`
+                                );
+                              }}
+                              className={`w-full px-3 py-3 text-left transition-colors ${
+                                activa
+                                  ? 'bg-sky-50'
+                                  : 'bg-white hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                  <p
+                                    className={`text-[11px] font-bold leading-snug ${
+                                      activa
+                                        ? 'text-[#006492]'
+                                        : 'text-slate-700'
+                                    }`}
+                                  >
+                                    {unidad.nombre}
+                                  </p>
+
+                                  <p className="mt-1 text-[10px] text-slate-400">
+                                    Último uso: {formatearFechaUnidad(unidad.ultimoUso)}
+                                    {' · '}
+                                    {unidad.cantidadRegistros}{' '}
+                                    {unidad.cantidadRegistros === 1
+                                      ? 'registro'
+                                      : 'registros'}
+                                  </p>
+                                </div>
+
+                                <span
+                                  className={`shrink-0 rounded-lg px-2 py-1 text-[10px] font-bold ${
+                                    activa
+                                      ? 'bg-[#006492] text-white'
+                                      : 'bg-slate-100 text-slate-500'
+                                  }`}
+                                >
+                                  {activa ? 'Elegida' : 'Usar'}
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {unidadesAnteriores.length > 0 && (
+                      <div className="border-t border-slate-100 bg-slate-50/70 px-3 py-2.5">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setMostrarAnteriores((prev) => !prev)
+                          }
+                          className="flex w-full items-center justify-between gap-2 text-[11px] font-bold text-[#006492]"
+                        >
+                          <span>
+                            {mostrarAnteriores
+                              ? 'Ocultar unidades anteriores'
+                              : 'Ver unidades anteriores'}
+                          </span>
+
+                          {mostrarAnteriores ? (
+                            <ChevronUp size={14} />
+                          ) : (
+                            <ChevronDown size={14} />
+                          )}
+                        </button>
+                      </div>
+                    )}
+
+                    {mostrarAnteriores && unidadesAnteriores.length > 0 && (
+                      <div className="max-h-64 divide-y divide-slate-100 overflow-y-auto border-t border-slate-100">
+                        {unidadesAnteriores.map((unidad) => {
+                          const activa =
+                            unidadActualNormalizada ===
+                            unidad.nombre
+                              .trim()
+                              .replace(/\s+/g, ' ')
+                              .toLocaleLowerCase('es-PE');
+
+                          return (
+                            <button
+                              key={`anterior-${unidad.nombre}-${unidad.ultimoUso}`}
+                              type="button"
+                              onClick={() => {
+                                f.setUnidad(unidad.nombre);
+                                mostrarNotificacion(
+                                  `Unidad seleccionada: ${unidad.nombre}`
+                                );
+                              }}
+                              className={`w-full px-3 py-3 text-left transition-colors ${
+                                activa
+                                  ? 'bg-sky-50'
+                                  : 'bg-white hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                  <p
+                                    className={`text-[11px] font-bold leading-snug ${
+                                      activa
+                                        ? 'text-[#006492]'
+                                        : 'text-slate-700'
+                                    }`}
+                                  >
+                                    {unidad.nombre}
+                                  </p>
+
+                                  <p className="mt-1 text-[10px] text-slate-400">
+                                    Último uso: {formatearFechaUnidad(unidad.ultimoUso)}
+                                    {' · '}
+                                    {unidad.cantidadRegistros}{' '}
+                                    {unidad.cantidadRegistros === 1
+                                      ? 'registro'
+                                      : 'registros'}
+                                  </p>
+                                </div>
+
+                                <span
+                                  className={`shrink-0 rounded-lg px-2 py-1 text-[10px] font-bold ${
+                                    activa
+                                      ? 'bg-[#006492] text-white'
+                                      : 'bg-slate-100 text-slate-500'
+                                  }`}
+                                >
+                                  {activa ? 'Elegida' : 'Usar'}
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">Nombre de la Actividad</label>
@@ -200,7 +455,7 @@ export default function EditarPlantillaPage({ params }: { params: Promise<{ id: 
               <label className="block text-xs font-semibold text-slate-700">
                 Indicadores de Evaluación
                 <span className="ml-2 text-xs font-normal text-slate-400">
-                  ({f.items.length} de {f.filasPlantilla} filas impresas)
+                  ({f.items.length} indicadores · plantilla base: {f.filasPlantilla})
                 </span>
               </label>
               <button

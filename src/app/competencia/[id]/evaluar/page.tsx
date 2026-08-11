@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { use, useRef, useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { RotateCcw, Trash2, Eye, Check, ClipboardList, BookOpen, Sparkles, Mic, MicOff } from 'lucide-react';
+import { RotateCcw, Trash2, Eye, Check, ClipboardList, BookOpen, Sparkles, Mic, MicOff, UserCheck, UserX } from 'lucide-react';
 import { useFicha } from '@/lib/useFicha';
 import { MAX_NINOS } from '@/lib/competencias';
 import { claseNivel, claseNivelBadge, etiquetaNivel, obtenerIniciales, colorDeArea, formatearCapacidades } from '@/lib/ui';
@@ -332,8 +332,21 @@ export default function EvaluarPage({ params }: { params: Promise<{ id: string }
                             type="button"
                             onClick={() => {
                               if (f.ninos.length <= 1) return;
-                              const tieneDatos = n.nombre.trim() !== '' && (n.calificaciones.some(Boolean) || n.observacionDescriptiva.trim() !== '');
-                              if (tieneDatos && !confirm(`¿Quitar a "${n.nombre}" de esta ficha? Se perderán sus calificaciones y observación.`)) return;
+                              const tieneDatos =
+                                n.nombre.trim() !== '' &&
+                                (
+                                  n.calificaciones.some(Boolean) ||
+                                  n.observacionDescriptiva.trim() !== '' ||
+                                  n.asistencia === 'falto'
+                                );
+                              if (
+                                tieneDatos &&
+                                !confirm(
+                                  `¿Quitar a "${n.nombre}" de esta ficha? Se perderán sus calificaciones, asistencia y observación.`
+                                )
+                              ) {
+                                return;
+                              }
                               f.eliminarNino(idx);
                             }}
                             className="text-red-500 hover:bg-red-50 rounded p-1"
@@ -342,6 +355,35 @@ export default function EvaluarPage({ params }: { params: Promise<{ id: string }
                             <Trash2 size={16} />
                           </button>
                         </div>
+
+                        {n.nombre.trim() !== '' && (
+                          <div className="inline-flex w-full overflow-hidden rounded-lg border border-slate-300 bg-white">
+                            <button
+                              type="button"
+                              onClick={() => f.handleAsistencia(idx, 'presente')}
+                              className={`flex-1 px-1.5 py-1 text-[10px] font-bold transition-colors ${
+                                n.asistencia !== 'falto'
+                                  ? 'bg-emerald-600 text-white'
+                                  : 'bg-white text-slate-500 hover:bg-slate-50'
+                              }`}
+                              title="El niño asistió a la sesión"
+                            >
+                              Presente
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => f.handleAsistencia(idx, 'falto')}
+                              className={`flex-1 border-l border-slate-300 px-1.5 py-1 text-[10px] font-bold transition-colors ${
+                                n.asistencia === 'falto'
+                                  ? 'bg-rose-600 text-white'
+                                  : 'bg-white text-slate-500 hover:bg-slate-50'
+                              }`}
+                              title="El niño faltó a la sesión"
+                            >
+                              Faltó
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </th>
                   ))}
@@ -352,22 +394,41 @@ export default function EvaluarPage({ params }: { params: Promise<{ id: string }
                   <tr key={indicadorIdx} className="border-t border-slate-100 even:bg-slate-50/50">
                     <td className="sticky left-0 z-10 bg-white even:bg-slate-50 p-2 text-slate-700 align-top">{texto}</td>
                     {f.ninos.map((n, ninoIdx) => (
-                      <td key={n.id} className="p-2 align-top">
-                        <div className="inline-flex rounded-lg overflow-hidden border border-slate-300 w-full">
-                          {NIVELES.map((nivel, i) => (
-                            <button
-                              key={nivel}
-                              type="button"
-                              onClick={() => f.handleCalificacion(ninoIdx, indicadorIdx, nivel)}
-                              className={`flex-1 px-1.5 py-1 text-[11px] font-bold transition-all ${i > 0 ? 'border-l border-slate-300' : ''} ${claseNivel(
-                                nivel,
-                                n.calificaciones[indicadorIdx] === nivel
-                              )}`}
-                            >
-                              {nivel}
-                            </button>
-                          ))}
-                        </div>
+                      <td
+                        key={n.id}
+                        className={`p-2 align-top ${
+                          n.asistencia === 'falto' ? 'bg-slate-100/80' : ''
+                        }`}
+                      >
+                        {n.asistencia === 'falto' ? (
+                          <div className="flex min-h-[30px] items-center justify-center rounded-lg border border-slate-200 bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-400">
+                            Faltó
+                          </div>
+                        ) : (
+                          <div className="inline-flex rounded-lg overflow-hidden border border-slate-300 w-full">
+                            {NIVELES.map((nivel, i) => (
+                              <button
+                                key={nivel}
+                                type="button"
+                                onClick={() =>
+                                  f.handleCalificacion(
+                                    ninoIdx,
+                                    indicadorIdx,
+                                    nivel
+                                  )
+                                }
+                                className={`flex-1 px-1.5 py-1 text-[11px] font-bold transition-all ${
+                                  i > 0 ? 'border-l border-slate-300' : ''
+                                } ${claseNivel(
+                                  nivel,
+                                  n.calificaciones[indicadorIdx] === nivel
+                                )}`}
+                              >
+                                {nivel}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </td>
                     ))}
                   </tr>
@@ -386,14 +447,21 @@ export default function EvaluarPage({ params }: { params: Promise<{ id: string }
           {f.ninos.map((n, idx) => {
             const totalIndicadores = f.indicadoresActivos.length;
             const calificados = n.calificaciones.filter(Boolean).length;
-            const completo = totalIndicadores > 0 && calificados === totalIndicadores;
+            const falto = n.asistencia === 'falto';
+            const completo =
+              falto ||
+              (totalIndicadores > 0 && calificados === totalIndicadores);
             const estaGrabando = grabandoIndex === idx;
 
             return (
               <div
                 key={n.id}
-                className={`p-4 border border-slate-200 rounded-xl space-y-3 shadow-[0px_4px_12px_rgba(0,0,0,0.03)] ${
-                  completo ? 'bg-green-50' : 'bg-slate-50'
+                className={`p-4 border rounded-xl space-y-3 shadow-[0px_4px_12px_rgba(0,0,0,0.03)] ${
+                  falto
+                    ? 'border-rose-200 bg-rose-50/60'
+                    : completo
+                      ? 'border-emerald-200 bg-green-50'
+                      : 'border-slate-200 bg-slate-50'
                 }`}
               >
                 <div className="flex items-center gap-3 flex-wrap">
@@ -402,59 +470,134 @@ export default function EvaluarPage({ params }: { params: Promise<{ id: string }
                   </div>
                   <span className="flex-1 text-sm font-semibold text-slate-800">{n.nombre || '(sin nombre)'}</span>
 
-                  {totalIndicadores > 0 && (
-                    <span
-                      className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-                        completo ? 'bg-green-600 text-white' : 'bg-amber-100 text-amber-700'
-                      }`}
-                    >
-                      {calificados}/{totalIndicadores} calificados
+                  {falto ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-rose-600 px-2.5 py-1 text-[11px] font-bold text-white">
+                      <UserX size={12} />
+                      No asistió
                     </span>
-                  )}
-                  {n.nivelAlcanzado && (
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${claseNivelBadge(n.nivelAlcanzado)}`}>
-                      {etiquetaNivel(n.nivelAlcanzado)} ({n.nivelAlcanzado})
-                    </span>
+                  ) : (
+                    <>
+                      {totalIndicadores > 0 && (
+                        <span
+                          className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                            completo
+                              ? 'bg-green-600 text-white'
+                              : 'bg-amber-100 text-amber-700'
+                          }`}
+                        >
+                          {calificados}/{totalIndicadores} calificados
+                        </span>
+                      )}
+
+                      {n.nivelAlcanzado && (
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${claseNivelBadge(
+                            n.nivelAlcanzado
+                          )}`}
+                        >
+                          {etiquetaNivel(n.nivelAlcanzado)} ({n.nivelAlcanzado})
+                        </span>
+                      )}
+                    </>
                   )}
 
                   <div className="inline-flex rounded-lg overflow-hidden border border-slate-300">
-                    {NIVELES.map((nivel, i) => (
-                      <button
-                        key={nivel}
-                        type="button"
-                        onClick={() => f.handleNivelManual(idx, nivel)}
-                        className={`px-3.5 py-2.5 text-xs font-bold transition-all min-h-[44px] ${i > 0 ? 'border-l border-slate-300' : ''} ${claseNivel(
-                          nivel,
-                          n.nivelAlcanzado === nivel
-                        )}`}
-                      >
-                        {nivel}
-                      </button>
-                    ))}
+                    <button
+                      type="button"
+                      onClick={() => f.handleAsistencia(idx, 'presente')}
+                      className={`flex min-h-[44px] items-center gap-1.5 px-3 py-2.5 text-xs font-bold transition-colors ${
+                        !falto
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-white text-slate-500 hover:bg-slate-50'
+                      }`}
+                    >
+                      <UserCheck size={14} />
+                      Presente
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => f.handleAsistencia(idx, 'falto')}
+                      className={`flex min-h-[44px] items-center gap-1.5 border-l border-slate-300 px-3 py-2.5 text-xs font-bold transition-colors ${
+                        falto
+                          ? 'bg-rose-600 text-white'
+                          : 'bg-white text-slate-500 hover:bg-slate-50'
+                      }`}
+                    >
+                      <UserX size={14} />
+                      Faltó
+                    </button>
                   </div>
+
+                  {!falto && (
+                    <div className="inline-flex rounded-lg overflow-hidden border border-slate-300">
+                      {NIVELES.map((nivel, i) => (
+                        <button
+                          key={nivel}
+                          type="button"
+                          onClick={() => f.handleNivelManual(idx, nivel)}
+                          className={`px-3.5 py-2.5 text-xs font-bold transition-all min-h-[44px] ${
+                            i > 0 ? 'border-l border-slate-300' : ''
+                          } ${claseNivel(
+                            nivel,
+                            n.nivelAlcanzado === nivel
+                          )}`}
+                        >
+                          {nivel}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Área del textarea con botón de micrófono */}
                 <div className="relative">
                   <textarea
                     rows={2}
-                    placeholder="Escribe la observación descriptiva o usa el micrófono..."
+                    placeholder={
+                      falto
+                        ? 'No asistió.'
+                        : 'Escribe la observación descriptiva o usa el micrófono...'
+                    }
                     value={n.observacionDescriptiva}
-                    onChange={(e) => f.handleObservacion(idx, e.target.value)}
-                    className="w-full border border-slate-300 p-2 pr-10 rounded-lg text-xs bg-white text-slate-800"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => toggleGrabacionVoz(idx, n.observacionDescriptiva)}
-                    title={estaGrabando ? 'Detener grabación' : 'Dictar por voz'}
-                    className={`absolute right-2 bottom-3 p-1.5 rounded-full transition-all ${
-                      estaGrabando
-                        ? 'bg-red-500 text-white animate-pulse'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    onChange={(e) =>
+                      f.handleObservacion(idx, e.target.value)
+                    }
+                    disabled={falto}
+                    className={`w-full border p-2 rounded-lg text-xs ${
+                      falto
+                        ? 'border-rose-200 bg-rose-50 text-rose-700 font-semibold cursor-not-allowed'
+                        : 'border-slate-300 bg-white pr-10 text-slate-800'
                     }`}
-                  >
-                    {estaGrabando ? <MicOff size={14} /> : <Mic size={14} />}
-                  </button>
+                  />
+
+                  {!falto && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        toggleGrabacionVoz(
+                          idx,
+                          n.observacionDescriptiva
+                        )
+                      }
+                      title={
+                        estaGrabando
+                          ? 'Detener grabación'
+                          : 'Dictar por voz'
+                      }
+                      className={`absolute right-2 bottom-3 p-1.5 rounded-full transition-all ${
+                        estaGrabando
+                          ? 'bg-red-500 text-white animate-pulse'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {estaGrabando ? (
+                        <MicOff size={14} />
+                      ) : (
+                        <Mic size={14} />
+                      )}
+                    </button>
+                  )}
                 </div>
               </div>
             );
