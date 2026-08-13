@@ -277,8 +277,11 @@ export function useFicha(competenciaId: string, evaluacionIdAEditar?: string) {
               );
             }
 
+            const evaluacionRecuperada =
+              data.evaluacion as EvaluacionGuardada;
+
             evaluacionExistente =
-              data.evaluacion;
+              evaluacionRecuperada;
 
             /**
              * Guardamos también la evaluación recuperada por
@@ -286,7 +289,13 @@ export function useFicha(competenciaId: string, evaluacionIdAEditar?: string) {
              * tenga que repetir esta petición.
              */
             actualizarCacheEvaluacion(
-              evaluacionExistente
+              evaluacionRecuperada
+            );
+          }
+
+          if (!evaluacionExistente) {
+            throw new Error(
+              'No se pudo determinar la evaluación que se desea editar.'
             );
           }
 
