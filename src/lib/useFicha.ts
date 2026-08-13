@@ -9,6 +9,10 @@ import { useListaAlumnos } from '@/lib/useListaAlumnos';
 import { CONTENIDO_OFICIAL } from '@/lib/contenidoOficial';
 import { UNIDADES_PREDEFINIDAS } from '@/lib/unidadesPredefinidas';
 import {
+  actualizarCacheEvaluacion,
+  obtenerEvaluacionCache,
+} from '@/lib/useEvaluaciones';
+import {
   EvaluacionGuardada,
   MoldeGuardado,
   Nivel,
@@ -163,20 +167,51 @@ export function useFicha(competenciaId: string, evaluacionIdAEditar?: string) {
           if (borrador) {
             let creadoEn = borrador.creadoEn;
 
-            // Los borradores creados antes de esta migraciÃ³n no tienen timestamp.
-            // Lo recuperamos de Drive sin reemplazar el contenido local del borrador.
+            // Los borradores creados antes de esta migración no tienen timestamp.
+            // Primero intentamos recuperarlo desde la caché compartida.
+            // Solo usamos /api/drive/obtener como fallback si la evaluación
+            // todavía no fue cargada en este navegador.
             if (!creadoEn) {
-              try {
-                const respuesta = await fetch(
-                  `/api/drive/obtener?id=${encodeURIComponent(evaluacionIdAEditar)}`,
-                  { method: 'GET', cache: 'no-store' }
+              const cacheada =
+                obtenerEvaluacionCache(
+                  evaluacionIdAEditar
                 );
-                const datos = await respuesta.json();
-                if (respuesta.ok && datos.ok && typeof datos.evaluacion?.creadoEn === 'string') {
-                  creadoEn = datos.evaluacion.creadoEn;
+
+              if (
+                typeof cacheada?.creadoEn ===
+                'string'
+              ) {
+                creadoEn =
+                  cacheada.creadoEn;
+              } else {
+                try {
+                  const respuesta =
+                    await fetch(
+                      `/api/drive/obtener?id=${encodeURIComponent(
+                        evaluacionIdAEditar
+                      )}`,
+                      {
+                        method: 'GET',
+                        cache: 'no-store',
+                      }
+                    );
+
+                  const datos =
+                    await respuesta.json();
+
+                  if (
+                    respuesta.ok &&
+                    datos.ok &&
+                    typeof datos.evaluacion
+                      ?.creadoEn === 'string'
+                  ) {
+                    creadoEn =
+                      datos.evaluacion.creadoEn;
+                  }
+                } catch {
+                  // El borrador sigue disponible incluso si
+                  // la red no permite recuperar el timestamp.
                 }
-              } catch {
-                // El borrador sigue disponible aun si la red no permite recuperar el timestamp.
               }
             }
 
@@ -202,28 +237,60 @@ export function useFicha(competenciaId: string, evaluacionIdAEditar?: string) {
           }
 
           /**
-           * Si no hay borrador, cargamos la evaluación real
-           * directamente desde Google Drive.
+           * Si no hay borrador, intentamos primero cargar la
+           * evaluación desde la caché compartida.
+           *
+           * Esto hace que abrir "Editar" desde Drive sea casi
+           * inmediato cuando el listado ya fue cargado.
+           *
+           * /api/drive/obtener queda como fallback para enlaces
+           * directos o sesiones donde la caché todavía no existe.
            */
-          const response = await fetch(
-            `/api/drive/obtener?id=${encodeURIComponent(evaluacionIdAEditar)}`,
-            {
-              method: 'GET',
-              cache: 'no-store',
+          let evaluacionExistente =
+            obtenerEvaluacionCache(
+              evaluacionIdAEditar
+            );
+
+          if (!evaluacionExistente) {
+            const response =
+              await fetch(
+                `/api/drive/obtener?id=${encodeURIComponent(
+                  evaluacionIdAEditar
+                )}`,
+                {
+                  method: 'GET',
+                  cache: 'no-store',
+                }
+              );
+
+            const data =
+              await response.json();
+
+            if (
+              !response.ok ||
+              !data.ok ||
+              !data.evaluacion
+            ) {
+              throw new Error(
+                data.error ||
+                  'No se pudo cargar la evaluación desde Google Drive.'
+              );
             }
-          );
 
-          const data = await response.json();
+            evaluacionExistente =
+              data.evaluacion;
 
-          if (!response.ok || !data.ok || !data.evaluacion) {
-            throw new Error(
-              data.error || 'No se pudo cargar la evaluación desde Google Drive.'
+            /**
+             * Guardamos también la evaluación recuperada por
+             * fallback para que la siguiente navegación ya no
+             * tenga que repetir esta petición.
+             */
+            actualizarCacheEvaluacion(
+              evaluacionExistente
             );
           }
 
           if (cancelado) return;
-
-          const evaluacionExistente = data.evaluacion;
 
           setActividad(evaluacionExistente.tituloActividad || '');
           setUnidad(evaluacionExistente.unidad || '');
@@ -654,6 +721,14 @@ export function useFicha(competenciaId: string, evaluacionIdAEditar?: string) {
 
     setEvaluacionIdActual(guardada.id);
     setCreadoEnEvaluacion(guardada.creadoEn);
+
+    /**
+     * Drive ya confirmó el guardado.
+     * Actualizamos inmediatamente la caché compartida para que,
+     * al volver a Drive / Alumnos / Reportes, se vea la versión
+     * nueva sin esperar otra consulta completa.
+     */
+    actualizarCacheEvaluacion(guardada);
 
     return {
       ...guardada,
