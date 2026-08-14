@@ -2,13 +2,17 @@
 
 import { use, useState } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import {
+  useRouter,
+  useSearchParams,
+} from 'next/navigation';
 import {
   ArrowLeft,
   Save,
   FileSpreadsheet,
   AlertTriangle,
 } from 'lucide-react';
+
 import { useFicha } from '@/lib/useFicha';
 import { VistaPreviaExcel } from '@/components/VistaPreviaExcel';
 
@@ -22,9 +26,13 @@ export default function VistaPreviaPage({
   const router = useRouter();
 
   const evaluacionId =
-    useSearchParams().get('evaluacionId') || undefined;
+    useSearchParams().get('evaluacionId') ||
+    undefined;
 
-  const f = useFicha(id, evaluacionId);
+  const f = useFicha(
+    id,
+    evaluacionId
+  );
 
   const [descargando, setDescargando] =
     useState(false);
@@ -35,8 +43,10 @@ export default function VistaPreviaPage({
   const [toast, setToast] =
     useState('');
 
-  const [errorGuardado, setErrorGuardado] =
-    useState('');
+  const [
+    errorGuardado,
+    setErrorGuardado,
+  ] = useState('');
 
   if (f.error) {
     return (
@@ -167,7 +177,9 @@ export default function VistaPreviaPage({
 
   return (
     <main className="max-w-5xl mx-auto p-4 md:p-8 space-y-5">
-      {/* Cabecera */}
+      {/* =======================================================
+          CABECERA
+      ======================================================= */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
           <h1 className="text-xl md:text-2xl font-bold text-slate-900">
@@ -234,14 +246,18 @@ export default function VistaPreviaPage({
         </div>
       </div>
 
-      {/* Éxito */}
+      {/* =======================================================
+          MENSAJE DE ÉXITO
+      ======================================================= */}
       {toast && (
         <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg p-3">
           {toast}
         </div>
       )}
 
-      {/* Error de Google Drive */}
+      {/* =======================================================
+          ERROR DE GOOGLE DRIVE
+      ======================================================= */}
       {errorGuardado && (
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-4">
           <p className="font-semibold">
@@ -258,21 +274,24 @@ export default function VistaPreviaPage({
         </div>
       )}
 
-      {/* Advertencias */}
+      {/* =======================================================
+          ADVERTENCIAS
+      ======================================================= */}
       {advertencias.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-1">
           <p className="text-xs font-bold text-amber-800 flex items-center gap-1.5">
             <AlertTriangle
               size={14}
             />
+
             Antes de descargar o guardar, revisa lo siguiente:
           </p>
 
           <ul className="text-xs text-amber-700 list-disc list-inside space-y-0.5">
             {advertencias.map(
-              (a, i) => (
+              (advertencia, i) => (
                 <li key={i}>
-                  {a}
+                  {advertencia}
                 </li>
               )
             )}
@@ -280,9 +299,12 @@ export default function VistaPreviaPage({
         </div>
       )}
 
-      {/* Vista previa */}
+      {/* =======================================================
+          VISTA PREVIA
+      ======================================================= */}
       <VistaPreviaExcel
         actividad={f.actividad}
+        unidad={f.unidad}
         fecha={f.fecha}
         competenciaTexto={
           f.competenciaTexto

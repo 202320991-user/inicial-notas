@@ -28,17 +28,32 @@ import {
   Plus, 
   FileSpreadsheet, 
   X,
-  Users
+  Users,
+  SlidersHorizontal,
+  ChevronDown
 } from 'lucide-react';
 
 const AREAS = agruparPorArea(COMPETENCIAS);
 
 type PresetFecha = 'todo' | 'este_bimestre' | 'b1' | 'b2' | 'b3' | 'b4';
+type OrdenDrive = 'fecha' | 'modificacion';
 
 function fechaISO(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+type UnidadFiltro = {
+  nombre: string;
+  ultimoUso: string;
+  cantidadRegistros: number;
+};
+
+function normalizarUnidad(unidad: string): string {
+  return unidad
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLocaleLowerCase('es-PE');
+}
 function DriveContenido() {
   const searchParams = useSearchParams();
   const { evaluaciones, cargado, error: errorDrive, eliminar } = useEvaluaciones();
@@ -47,10 +62,14 @@ function DriveContenido() {
   const [texto, setTexto] = useState('');
   const [area, setArea] = useState('');
   const [competenciaId, setCompetenciaId] = useState('');
+  const [unidad, setUnidad] = useState('');
   const [alumnoId, setAlumnoId] = useState('');
   const [preset, setPreset] = useState<PresetFecha>('todo');
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
+  const [orden, setOrden] = useState<OrdenDrive>('fecha');
+  const [mostrarFiltrosSecundarios, setMostrarFiltrosSecundarios] =
+    useState(false);
 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [verEvaluacion, setVerEvaluacion] = useState<EvaluacionGuardada | null>(null);
@@ -66,8 +85,96 @@ function DriveContenido() {
     if (desdeUrl) setAlumnoId(desdeUrl);
   }, [searchParams]);
 
-  const competenciasDelArea = useMemo(() => (area ? COMPETENCIAS.filter((c) => c.area === area) : COMPETENCIAS), [area]);
-  const alumnoActivo = useMemo(() => listaAlumnos.find((a) => a.id === alumnoId), [listaAlumnos, alumnoId]);
+  const competenciasDelArea = useMemo(
+    () =>
+      area
+        ? COMPETENCIAS.filter((c) => c.area === area)
+        : COMPETENCIAS,
+    [area]
+  );
+
+  const alumnoActivo = useMemo(
+    () => listaAlumnos.find((a) => a.id === alumnoId),
+    [listaAlumnos, alumnoId]
+  );
+
+  /**
+   * Las unidades del filtro se construyen directamente a partir
+   * de las evaluaciones guardadas en Drive.
+   *
+   * - No hay una lista fija.
+   * - No importa cuántas unidades existan.
+   * - Si una misma unidad aparece en varias evaluaciones, se
+   *   muestra una sola vez.
+   * - Se conserva la fecha del uso más reciente.
+   */
+  const unidadesDisponibles = useMemo<UnidadFiltro[]>(() => {
+    const agrupadas = new Map<string, UnidadFiltro>();
+
+    evaluaciones.forEach((evaluacion) => {
+      const nombre = evaluacion.unidad?.trim();
+
+      if (!nombre) return;
+
+      const clave = normalizarUnidad(nombre);
+      const existente = agrupadas.get(clave);
+
+      if (!existente) {
+        agrupadas.set(clave, {
+          nombre,
+          ultimoUso: evaluacion.fecha || '',
+          cantidadRegistros: 1,
+        });
+
+        return;
+      }
+
+      existente.cantidadRegistros += 1;
+
+      if (
+        (evaluacion.fecha || '') >
+        (existente.ultimoUso || '')
+      ) {
+        existente.nombre = nombre;
+        existente.ultimoUso = evaluacion.fecha || '';
+      }
+    });
+
+    return Array.from(agrupadas.values()).sort((a, b) => {
+      const porFecha = (b.ultimoUso || '').localeCompare(
+        a.ultimoUso || ''
+      );
+
+      if (porFecha !== 0) {
+        return porFecha;
+      }
+
+      return a.nombre.localeCompare(b.nombre, 'es');
+    });
+  }, [evaluaciones]);
+  const cantidadFiltrosActivos = useMemo(() => {
+    let total = 0;
+
+    if (texto.trim()) total++;
+    if (area) total++;
+    if (competenciaId) total++;
+    if (unidad) total++;
+    if (alumnoId) total++;
+    if (preset !== 'todo') total++;
+    if (desde) total++;
+    if (hasta) total++;
+
+    return total;
+  }, [
+    texto,
+    area,
+    competenciaId,
+    unidad,
+    alumnoId,
+    preset,
+    desde,
+    hasta,
+  ]);
 
   const aplicarPreset = (nuevo: PresetFecha) => {
     setPreset(nuevo);
@@ -103,6 +210,7 @@ function DriveContenido() {
     setTexto('');
     setArea('');
     setCompetenciaId('');
+    setUnidad('');
     setAlumnoId('');
     aplicarPreset('todo');
   };
@@ -123,6 +231,14 @@ function DriveContenido() {
         if (area && ev.areaNombre !== area) return false;
         if (competenciaId && ev.competenciaId !== competenciaId) return false;
 
+        if (
+          unidad &&
+          normalizarUnidad(ev.unidad || '') !==
+            normalizarUnidad(unidad)
+        ) {
+          return false;
+        }
+
         if (alumnoId) {
           if (!alumnoActivo) return false;
 
@@ -139,11 +255,70 @@ function DriveContenido() {
         return true;
       })
       .sort((a, b) => {
-        const fechaA = a.actualizadoEn || a.fecha || '';
-        const fechaB = b.actualizadoEn || b.fecha || '';
-        return fechaB.localeCompare(fechaA);
+        if (orden === 'modificacion') {
+          const modificacionA =
+            a.actualizadoEn ||
+            a.fecha ||
+            '';
+
+          const modificacionB =
+            b.actualizadoEn ||
+            b.fecha ||
+            '';
+
+          const resultado =
+            modificacionB.localeCompare(
+              modificacionA
+            );
+
+          if (resultado !== 0) {
+            return resultado;
+          }
+
+          return (b.fecha || '').localeCompare(
+            a.fecha || ''
+          );
+        }
+
+        /**
+         * Orden principal del historial:
+         * fecha pedagógica/evaluación.
+         *
+         * Así una ficha antigua que fue corregida hoy
+         * permanece junto a las demás fichas de su fecha.
+         */
+        const fechaA = a.fecha || '';
+        const fechaB = b.fecha || '';
+
+        const resultado =
+          fechaB.localeCompare(fechaA);
+
+        if (resultado !== 0) {
+          return resultado;
+        }
+
+        /**
+         * Si dos evaluaciones tienen la misma fecha,
+         * mostramos primero la modificada más recientemente.
+         */
+        return (
+          b.actualizadoEn || ''
+        ).localeCompare(
+          a.actualizadoEn || ''
+        );
       });
-  }, [evaluaciones, texto, area, competenciaId, alumnoId, alumnoActivo, desde, hasta]);
+  }, [
+    evaluaciones,
+    texto,
+    area,
+    competenciaId,
+    unidad,
+    alumnoId,
+    alumnoActivo,
+    desde,
+    hasta,
+    orden,
+  ]);
 
   const descargarDirecto = async (ev: EvaluacionGuardada) => {
     const compInfo = getCompetencia(ev.competenciaId);
@@ -272,131 +447,244 @@ function DriveContenido() {
         </div>
       </div>
 
-      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm mb-6 flex flex-col gap-3">
+      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm mb-6">
+        {/* =======================================================
+            FILTROS PRINCIPALES
+        ======================================================= */}
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex-1 min-w-[220px] relative">
+          <div className="flex-1 min-w-[230px] relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-            <input 
+            <input
               value={texto}
               onChange={(e) => setTexto(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#006492] text-xs text-slate-700 placeholder:text-slate-400 outline-none" 
-              placeholder="Buscar por actividad, competencia o alumno..." 
-              type="text" 
+              className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#006492] text-xs text-slate-700 placeholder:text-slate-400 outline-none"
+              placeholder="Buscar actividad..."
+              type="text"
             />
           </div>
 
-          <select 
+          <select
             value={area}
             onChange={(e) => {
               setArea(e.target.value);
               setCompetenciaId('');
             }}
-            className="bg-slate-50 border border-slate-200 rounded-xl text-xs px-3 py-2 text-slate-700 focus:ring-2 focus:ring-[#006492] cursor-pointer outline-none max-w-[180px]"
+            className="bg-slate-50 border border-slate-200 rounded-xl text-xs px-3 py-2 text-slate-700 focus:ring-2 focus:ring-[#006492] cursor-pointer outline-none min-w-[120px]"
           >
-            <option value="">Todas las áreas</option>
+            <option value="">Área</option>
             {AREAS.map(([nombreArea]) => (
-              <option key={nombreArea} value={nombreArea}>{nombreArea}</option>
+              <option key={nombreArea} value={nombreArea}>
+                {nombreArea}
+              </option>
             ))}
           </select>
 
-          <select 
+          <select
             value={competenciaId}
             onChange={(e) => setCompetenciaId(e.target.value)}
-            className="bg-slate-50 border border-slate-200 rounded-xl text-xs px-3 py-2 text-slate-700 focus:ring-2 focus:ring-[#006492] cursor-pointer outline-none max-w-[200px]"
+            className="bg-slate-50 border border-slate-200 rounded-xl text-xs px-3 py-2 text-slate-700 focus:ring-2 focus:ring-[#006492] cursor-pointer outline-none min-w-[150px] max-w-[200px]"
           >
-            <option value="">Todas las competencias</option>
+            <option value="">Competencia</option>
             {competenciasDelArea.map((c) => (
-              <option key={c.id} value={c.id}>{c.nombre}</option>
+              <option key={c.id} value={c.id}>
+                {c.nombre}
+              </option>
             ))}
           </select>
 
-          <select 
+          <select
+            value={unidad}
+            onChange={(e) => setUnidad(e.target.value)}
+            className="bg-slate-50 border border-slate-200 rounded-xl text-xs px-3 py-2 text-slate-700 focus:ring-2 focus:ring-[#006492] cursor-pointer outline-none min-w-[135px] max-w-[200px]"
+            title="Filtrar por unidad"
+          >
+            <option value="">Unidad</option>
+            {unidadesDisponibles.map((item) => (
+              <option
+                key={normalizarUnidad(item.nombre)}
+                value={item.nombre}
+              >
+                {item.nombre}
+              </option>
+            ))}
+          </select>
+
+          <select
             value={alumnoId}
             onChange={(e) => setAlumnoId(e.target.value)}
-            className="bg-slate-50 border border-slate-200 rounded-xl text-xs px-3 py-2 text-slate-700 focus:ring-2 focus:ring-[#006492] cursor-pointer outline-none max-w-[180px]"
+            className="bg-slate-50 border border-slate-200 rounded-xl text-xs px-3 py-2 text-slate-700 focus:ring-2 focus:ring-[#006492] cursor-pointer outline-none min-w-[150px] max-w-[200px]"
           >
-            <option value="">Todos los alumnos</option>
+            <option value="">Alumno...</option>
             {listaAlumnos.map((a) => (
-              <option key={a.id} value={a.id}>{a.nombre}</option>
+              <option key={a.id} value={a.id}>
+                {a.nombre}
+              </option>
             ))}
           </select>
 
-          <button 
-            type="button"
-            onClick={limpiarFiltros}
-            className="text-[#006492] text-xs font-bold hover:underline px-2"
-          >
-            Limpiar
-          </button>
+          {cantidadFiltrosActivos > 0 && (
+            <button
+              type="button"
+              onClick={limpiarFiltros}
+              className="flex items-center gap-1 text-[#006492] text-xs font-bold hover:underline px-1"
+            >
+              <X className="w-3.5 h-3.5" />
+              Limpiar filtros
+              <span className="inline-flex items-center justify-center min-w-5 h-5 px-1 rounded-full bg-blue-50 text-[10px]">
+                {cantidadFiltrosActivos}
+              </span>
+            </button>
+          )}
 
-          <div className="ml-auto flex border border-slate-200 rounded-xl overflow-hidden p-0.5 bg-slate-50">
-            <button 
-              type="button"
-              onClick={() => setViewMode('grid')}
-              className={`p-1.5 rounded-lg transition-colors ${viewMode === 'grid' ? 'bg-white text-[#006492] shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-              title="Vista Cuadrícula"
-            >
-              <LayoutGrid className="w-4 h-4" />
-            </button>
-            <button 
-              type="button"
-              onClick={() => setViewMode('list')}
-              className={`p-1.5 rounded-lg transition-colors ${viewMode === 'list' ? 'bg-white text-[#006492] shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-              title="Vista Lista"
-            >
-              <List className="w-4 h-4" />
-            </button>
-          </div>
+          {/* En móvil, los controles secundarios se pueden plegar */}
+          <button
+            type="button"
+            onClick={() =>
+              setMostrarFiltrosSecundarios((actual) => !actual)
+            }
+            className="md:hidden ml-auto flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600"
+            aria-expanded={mostrarFiltrosSecundarios}
+          >
+            <SlidersHorizontal className="w-4 h-4" />
+            Filtros
+            <ChevronDown
+              className={`w-3.5 h-3.5 transition-transform ${
+                mostrarFiltrosSecundarios ? 'rotate-180' : ''
+              }`}
+            />
+          </button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-slate-100">
-          <div className="flex flex-wrap gap-1">
-            {(
-              [
-                { id: 'todo', label: 'Todo' },
-                { id: 'este_bimestre', label: 'Este Bimestre' },
-                { id: 'b1', label: 'I Bim' },
-                { id: 'b2', label: 'II Bim' },
-                { id: 'b3', label: 'III Bim' },
-                { id: 'b4', label: 'IV Bim' },
-              ] as { id: PresetFecha; label: string }[]
-            ).map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => aplicarPreset(item.id)}
-                className={`text-[11px] font-semibold rounded-lg px-3 py-1 transition-colors border ${
-                  preset === item.id
-                    ? 'bg-[#006492] text-white border-[#006492]'
-                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
+        {/* =======================================================
+            FILTROS SECUNDARIOS
+            - Siempre visibles en escritorio.
+            - Desplegables en móvil.
+        ======================================================= */}
+        <div
+          className={`${
+            mostrarFiltrosSecundarios ? 'flex' : 'hidden'
+          } md:flex mt-4 pt-4 border-t border-slate-200 flex-col gap-4`}
+        >
+          {/* PERÍODO */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mr-1">
+              Período:
+            </span>
+
+            <div className="flex flex-wrap gap-1">
+              {(
+                [
+                  { id: 'todo', label: 'Todo' },
+                  { id: 'este_bimestre', label: 'Este Bimestre' },
+                  { id: 'b1', label: 'I' },
+                  { id: 'b2', label: 'II' },
+                  { id: 'b3', label: 'III' },
+                  { id: 'b4', label: 'IV' },
+                ] as {
+                  id: PresetFecha;
+                  label: string;
+                }[]
+              ).map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => aplicarPreset(item.id)}
+                  className={`text-[10px] font-semibold rounded-full px-3 py-1 transition-colors border ${
+                    preset === item.id
+                      ? 'bg-[#006492] text-white border-[#006492]'
+                      : 'bg-slate-100 text-slate-600 border-transparent hover:bg-slate-200'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 ml-auto text-xs text-slate-500">
-            <span>Desde:</span>
-            <input
-              type="date"
-              value={desde}
-              onChange={(e) => {
-                setDesde(e.target.value);
-                setPreset('todo');
-              }}
-              className="bg-slate-50 border border-slate-200 rounded-lg p-1 text-slate-700 outline-none"
-            />
-            <span>Hasta:</span>
-            <input
-              type="date"
-              value={hasta}
-              onChange={(e) => {
-                setHasta(e.target.value);
-                setPreset('todo');
-              }}
-              className="bg-slate-50 border border-slate-200 rounded-lg p-1 text-slate-700 outline-none"
-            />
+          {/* FECHAS + ORDEN + VISTA */}
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-xs text-slate-500">
+              <span>Desde</span>
+              <input
+                type="date"
+                value={desde}
+                onChange={(e) => {
+                  setDesde(e.target.value);
+                  setPreset('todo');
+                }}
+                className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-[#006492]"
+              />
+            </label>
+
+            <label className="flex items-center gap-2 text-xs text-slate-500">
+              <span>Hasta</span>
+              <input
+                type="date"
+                value={hasta}
+                onChange={(e) => {
+                  setHasta(e.target.value);
+                  setPreset('todo');
+                }}
+                className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-[#006492]"
+              />
+            </label>
+
+            <div className="hidden sm:block h-6 w-px bg-slate-200" />
+
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500">
+                Ordenar:
+              </span>
+
+              <select
+                value={orden}
+                onChange={(e) =>
+                  setOrden(e.target.value as OrdenDrive)
+                }
+                className="bg-white border border-slate-200 rounded-lg text-xs px-2.5 py-1.5 text-slate-700 focus:ring-2 focus:ring-[#006492] cursor-pointer outline-none"
+                title="Ordenar evaluaciones"
+              >
+                <option value="fecha">
+                  Fecha de evaluación
+                </option>
+                <option value="modificacion">
+                  Modificados recientemente
+                </option>
+              </select>
+            </div>
+
+            <div className="flex border border-slate-200 rounded-lg overflow-hidden ml-0 sm:ml-1">
+              <button
+                type="button"
+                onClick={() => setViewMode('grid')}
+                className={`p-2 transition-colors ${
+                  viewMode === 'grid'
+                    ? 'bg-[#006492] text-white'
+                    : 'bg-white text-slate-400 hover:bg-slate-50'
+                }`}
+                title="Vista Cuadrícula"
+              >
+                <LayoutGrid className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setViewMode('list')}
+                className={`p-2 transition-colors ${
+                  viewMode === 'list'
+                    ? 'bg-[#006492] text-white'
+                    : 'bg-white text-slate-400 hover:bg-slate-50'
+                }`}
+                title="Vista Lista"
+              >
+                <List className="w-4 h-4" />
+              </button>
+            </div>
+
+            <span className="ml-auto text-[11px] font-semibold text-slate-400">
+              {filtradas.length}{' '}
+              {filtradas.length === 1 ? 'resultado' : 'resultados'}
+            </span>
           </div>
         </div>
       </div>
@@ -441,7 +729,20 @@ function DriveContenido() {
                 </div>
 
                 <div className="p-4 flex-1 flex flex-col justify-between gap-4">
-                  <p className="text-xs text-slate-600 line-clamp-2">{ev.competenciaNombre}</p>
+                  <div>
+                    <p className="text-xs text-slate-600 line-clamp-2">
+                      {ev.competenciaNombre}
+                    </p>
+
+                    {ev.unidad?.trim() && (
+                      <p
+                        className="text-[11px] text-slate-400 mt-1 line-clamp-1"
+                        title={ev.unidad}
+                      >
+                        Unidad: {ev.unidad}
+                      </p>
+                    )}
+                  </div>
 
                   <div className="flex items-center justify-between pt-2 border-t border-slate-100">
                     <span className="text-xs font-semibold text-[#006492] bg-blue-50 px-2.5 py-1 rounded-full">
@@ -540,7 +841,17 @@ function DriveContenido() {
                       <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold ${color.light} ${color.text}`}>
                         {ev.areaNombre}
                       </span>
-                      <div className="text-slate-500 mt-0.5 line-clamp-1">{ev.competenciaNombre}</div>
+                      <div className="text-slate-500 mt-0.5 line-clamp-1">
+                        {ev.competenciaNombre}
+                      </div>
+                      {ev.unidad?.trim() && (
+                        <div
+                          className="text-slate-400 mt-1 line-clamp-1"
+                          title={ev.unidad}
+                        >
+                          Unidad: {ev.unidad}
+                        </div>
+                      )}
                     </td>
                     <td className="p-3.5">
                       <div 
